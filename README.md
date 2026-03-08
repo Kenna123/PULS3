@@ -38,10 +38,27 @@ python3 -m streamlit run app.py --server.port 8505
 
 Open: [http://localhost:8505](http://localhost:8505)
 
+## Deploy on Streamlit Community Cloud
+
+1. Push this project to a GitHub repository.
+2. Go to [share.streamlit.io](https://share.streamlit.io/) and sign in with GitHub.
+3. Click **Create app** and select:
+   - Repository: your PULS3 repo
+   - Branch: `main` (or your deployment branch)
+   - Main file path: `app.py`
+4. Click **Deploy**.
+
+### Runtime Notes
+
+- `requirements.txt` already contains all Python dependencies.
+- `runtime.txt` pins Python to `3.11` for reliable package compatibility on Streamlit Cloud.
+- No extra secrets are required for the current app flow.
+
 ## Project Files
 
 - `app.py` - main Streamlit application
 - `requirements.txt` - Python dependencies
+- `runtime.txt` - Python version for Streamlit Cloud
 - `.gitignore` - Python/Streamlit ignore rules
 
 ## Current Status
