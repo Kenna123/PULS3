@@ -202,7 +202,7 @@ def init_state() -> None:
     defaults = {
         "page": "login",
         "email": "",
-        "location": "Chicago, IL",
+        "location": "",
         "selected_crimes": ["Assault"],
         "logged_in": False,
         "monitoring_started": False,
@@ -560,44 +560,246 @@ def render_login() -> None:
 
 
 def render_setup(df: pd.DataFrame) -> None:
-    c1, c2, c3 = st.columns([1, 1.6, 1])
-    with c2:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("## Set Up Monitoring")
-        st.caption("Choose your area and select crimes to monitor.")
+    st.markdown(
+        """
+        <style>
+            .stApp, html, body {
+                background: #f6f6f7 !important;
+            }
+            .block-container {
+                max-width: 1100px !important;
+                min-height: 100vh;
+                margin: 0 auto !important;
+                padding-top: 56px !important;
+                padding-bottom: 56px !important;
+            }
+            .setup-fixed-logo {
+                position: relative;
+                display: block;
+                margin: 0 auto 24px auto;
+                height: 44px;
+            }
+            .setup-title {
+                margin: 0 0 20px;
+                color: #1F2937;
+                font-size: 34px;
+                line-height: 1.1;
+                font-weight: 700;
+                text-align: center;
+            }
+            .setup-sub {
+                margin: 0 0 20px;
+                color: #6B7280;
+                font-size: 14px;
+                text-align: center;
+            }
+            div[data-testid="stForm"] {
+                max-width: 720px;
+                margin: 0 auto !important;
+                background: #ffffff;
+                border-radius: 16px;
+                padding: 32px !important;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+                border: 1px solid #f0f0f0;
+                text-align: left;
+            }
+            div[data-testid="stForm"], div.stForm {
+                width: 100%;
+            }
+            div[data-testid="stForm"] form, div.stForm form {
+                border: 0 !important;
+                padding: 0 !important;
+            }
+            .section-label {
+                margin: 0 0 20px;
+                color: #374151;
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
+            div[data-testid="stForm"] .stTextInput [data-baseweb="input"],
+            div[data-testid="stForm"] .stTextInput [data-baseweb="base-input"] {
+                border: 1px solid #E5E7EB !important;
+                background: #F9FAFB !important;
+                border-radius: 8px !important;
+                box-shadow: none !important;
+            }
+            div[data-testid="stForm"] .stTextInput input {
+                width: 100% !important;
+                height: 48px !important;
+                border-radius: 8px !important;
+                border: 0 !important;
+                background: #F9FAFB !important;
+                padding: 0 14px 0 40px !important;
+                font-size: 14px !important;
+                line-height: 48px !important;
+                color: #374151 !important;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+                background-repeat: no-repeat !important;
+                background-position: 12px center !important;
+            }
+            div[data-testid="stForm"] .stTextInput input::placeholder {
+                color: #9CA3AF !important;
+            }
+            .helper-text {
+                margin: 6px 0 20px;
+                font-size: 12px;
+                color: #9CA3AF;
+            }
+            div[data-testid="stForm"] .stMultiSelect {
+                width: 100% !important;
+                margin-bottom: 14px;
+            }
+            div[data-baseweb="select"] > div {
+                background: #F9FAFB !important;
+                border: 1px solid #E5E7EB !important;
+                border-radius: 8px !important;
+                min-height: 48px !important;
+            }
+            div[data-testid="stForm"] .stMultiSelect [data-baseweb="select"] > div {
+                min-height: 48px !important;
+                align-items: center !important;
+            }
+            div[data-baseweb="select"] input {
+                color: #374151 !important;
+                -webkit-text-fill-color: #374151 !important;
+            }
+            div[data-testid="stForm"] .stMultiSelect input::placeholder {
+                color: #9CA3AF !important;
+                opacity: 1 !important;
+            }
+            div[data-baseweb="select"] span {
+                color: #374151 !important;
+            }
+            div[data-baseweb="tag"],
+            div[data-testid="stForm"] .stMultiSelect [data-baseweb="tag"] {
+                background: #7A1E24 !important;
+                border-radius: 6px !important;
+                border: none !important;
+                color: #ffffff !important;
+                font-weight: 600 !important;
+            }
+            div[data-baseweb="tag"] *,
+            div[data-testid="stForm"] .stMultiSelect [data-baseweb="tag"] * {
+                color: #ffffff !important;
+            }
+            div[role="listbox"] {
+                background: #ffffff !important;
+                color: #374151 !important;
+                border: 1px solid #E5E7EB !important;
+                border-radius: 10px !important;
+            }
+            div[role="option"] {
+                background: #ffffff !important;
+                color: #374151 !important;
+            }
+            div[role="option"]:hover {
+                background: #FDF4F5 !important;
+            }
+            div[data-testid="stForm"] .stFormSubmitButton > button {
+                width: 100% !important;
+                height: 56px !important;
+                margin-top: 24px !important;
+                background: #7A1E24 !important;
+                color: #ffffff !important;
+                border: 0 !important;
+                border-radius: 10px !important;
+                font-size: 16px !important;
+                font-weight: 600 !important;
+                box-shadow: 0 12px 22px rgba(122,30,36,0.25) !important;
+            }
+            .terms {
+                margin-top: 12px;
+                text-align: center;
+                font-size: 12px;
+                color: #9CA3AF;
+            }
+            .setup-copyright {
+                text-align: center;
+                color: #9CA3AF;
+                font-size: 12px;
+                margin-top: 40px;
+            }
+            @media (max-width: 640px) {
+                .setup-fixed-logo {
+                    margin-bottom: 20px;
+                    height: 28px;
+                }
+                .setup-title {
+                    font-size: 32px;
+                }
+                .setup-sub {
+                    font-size: 18px;
+                }
+                div[data-testid="stForm"] {
+                    margin-top: 0;
+                    padding: 24px !important;
+                }
+                .setup-copyright {
+                    margin-top: 56px;
+                }
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        district_options = sorted(df["District"].dropna().unique().tolist())
-        location_mode = st.radio("Monitoring Area Type", ["City", "District"], horizontal=True)
+    logo_path = Path("assets/puls3-logo.png")
+    logo_markup = ""
+    if logo_path.exists():
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+        logo_markup = f"<img class='setup-fixed-logo' src='data:image/png;base64,{logo_b64}' alt='PULS3 logo' />"
+    st.markdown(logo_markup, unsafe_allow_html=True)
 
-        if location_mode == "City":
-            st.session_state.location = st.text_input("Monitoring Area", value=st.session_state.location, placeholder="City, ST")
-            selected_districts = district_options
+    district_options = sorted(df["District"].dropna().unique().tolist())
+    setup_crime_options = ["Assault", "Robbery", "Theft"]
+    selected_default = [crime for crime in setup_crime_options if crime in st.session_state.selected_crimes]
+    if not selected_default:
+        selected_default = ["Assault"]
+
+    with st.form("setup_monitoring_form", clear_on_submit=False, border=False):
+        st.markdown("<h2 class='setup-title'>Set Up Monitoring</h2>", unsafe_allow_html=True)
+        st.markdown("<p class='setup-sub'>Choose your area and select crimes to monitor</p>", unsafe_allow_html=True)
+        st.markdown("<p class='section-label'>Monitoring Area</p>", unsafe_allow_html=True)
+        location_input = st.text_input(
+            "Monitoring Area",
+            value="",
+            placeholder="Search for city or zip code",
+            label_visibility="collapsed",
+        )
+        st.markdown("<div class='helper-text'>Example: Little Rock, AR</div>", unsafe_allow_html=True)
+
+        st.markdown("<p class='section-label'>Crime Types To Monitor</p>", unsafe_allow_html=True)
+        selected_now = st.multiselect(
+            "Crime Types To Monitor",
+            options=setup_crime_options,
+            default=selected_default,
+            label_visibility="collapsed",
+        )
+
+        submitted = st.form_submit_button("Start Monitoring \u2192", use_container_width=True)
+        st.markdown(
+            "<div class='terms'>By proceeding, you agree to our <u>Terms of Service</u></div>",
+            unsafe_allow_html=True,
+        )
+
+    if submitted:
+        st.session_state.location = location_input.strip() or "Little Rock, AR"
+        st.session_state.selected_crimes = selected_now
+        st.session_state["selected_districts"] = district_options
+
+        if not st.session_state.selected_crimes:
+            st.warning("Select at least one crime type.")
         else:
-            selected_districts = st.multiselect(
-                "Districts",
-                options=district_options,
-                default=district_options[:3],
-                help="Model is district-based using Chicago public data.",
-            )
-            st.session_state.location = f"Chicago Districts ({len(selected_districts)})"
+            st.session_state.monitoring_started = True
+            st.session_state.page = "dashboard"
+            st.rerun()
 
-        selected = st.multiselect("Crime Types to Monitor", options=CRIME_OPTIONS, default=st.session_state.selected_crimes)
-        if selected:
-            st.session_state.selected_crimes = selected
-
-        st.session_state["selected_districts"] = selected_districts
-
-        if st.button("Start Monitoring", use_container_width=True):
-            if not st.session_state.selected_crimes:
-                st.warning("Select at least one crime type.")
-            elif not selected_districts:
-                st.warning("Select at least one district.")
-            else:
-                st.session_state.monitoring_started = True
-                st.session_state.page = "dashboard"
-                st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='setup-copyright'>© 2024 PULS3 Civic Technology Systems. All rights reserved.</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def crime_type_trends(df: pd.DataFrame, selected_crimes: List[str]) -> pd.DataFrame:
