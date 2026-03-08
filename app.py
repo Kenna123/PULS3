@@ -753,6 +753,8 @@ def render_setup(df: pd.DataFrame) -> None:
     st.markdown(logo_markup, unsafe_allow_html=True)
 
     district_options = sorted(df["District"].dropna().unique().tolist())
+    if "selected_districts" not in st.session_state:
+        st.session_state["selected_districts"] = district_options
     setup_crime_options = ["Assault", "Robbery", "Theft"]
     selected_default = [crime for crime in setup_crime_options if crime in st.session_state.selected_crimes]
     if not selected_default:
@@ -843,13 +845,17 @@ def get_alert_log(df: pd.DataFrame, selected_crimes: List[str], districts: List[
 
 def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     selected_crimes = st.session_state.selected_crimes
+    location = st.session_state.location
     selected_districts = st.session_state.get("selected_districts", [])
+    filtered_df = df[df["Primary_Type"].isin(selected_crimes)].copy()
+    if filtered_df.empty:
+        filtered_df = df.copy()
 
     st.markdown(
         f"""
         <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;'>
             <h2 style='margin:0;' class='brand'>PULS3</h2>
-            <div style='color:{THEME['muted']}; font-weight:600;'>📍 {st.session_state.location}</div>
+            <div style='color:{THEME['muted']}; font-weight:600;'>📍 {location}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -863,7 +869,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
 
     top = risk_df.iloc[0] if not risk_df.empty else None
     warning_msg = (
-        f"Early Warning: {selected_crimes[0]} - District {top['District']}"
+        f"Early Warning: {selected_crimes[0]} risk rising in District {top['District']}"
         if top is not None
         else "Early Warning: Insufficient model signal"
     )
@@ -871,7 +877,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
 
     st.write("")
     st.subheader("Crime Type Trends (Last 24h)")
-    trends = crime_type_trends(df, selected_crimes)
+    trends = crime_type_trends(filtered_df, selected_crimes)
     cols = st.columns(max(1, len(selected_crimes)))
     for i, row in trends.iterrows():
         with cols[i % len(cols)]:
@@ -890,7 +896,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
 
     st.write("")
     st.subheader("Recent Alert Log")
-    alerts = get_alert_log(df, selected_crimes, selected_districts)
+    alerts = get_alert_log(filtered_df, selected_crimes, selected_districts)
     st.dataframe(alerts, use_container_width=True, hide_index=True)
 
     st.write("")
@@ -906,7 +912,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         st.caption(f"{focus['crime']} incidents are changing vs prior 24-hour baseline.")
 
         trend_src = (
-            df[df["Primary_Type"] == focus["crime"]]
+            filtered_df[filtered_df["Primary_Type"] == focus["crime"]]
             .set_index("Date")
             .resample("D")
             .size()
@@ -923,7 +929,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         else:
             growth = 0.0
 
-        focus_df = df[df["Primary_Type"] == focus["crime"]]
+        focus_df = filtered_df[filtered_df["Primary_Type"] == focus["crime"]]
         peak_hour = int(focus_df["Date"].dt.hour.mode().iloc[0]) if not focus_df.empty else 20
 
         c1.metric("Growth Rate", f"{growth:+.1f}%")
@@ -937,12 +943,12 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         if risk_df.empty:
             st.caption("No zone risks available.")
         else:
-            for _, row in risk_df.head(8).iterrows():
+            for _, row in risk_df.head(5).iterrows():
                 sev = str(row["severity"]).lower()
                 st.markdown(
                     f"""
                     <div style='display:flex; justify-content:space-between; border:1px solid {THEME['line']}; border-radius:10px; padding:10px; margin-bottom:8px; background:white;'>
-                        <div>District {row['District']}</div>
+                        <div>District {row['District']} — Risk: {row['risk_prob']:.2f}</div>
                         <span class='pill pill-{sev}'>{row['severity']}</span>
                     </div>
                     """,
