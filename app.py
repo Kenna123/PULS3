@@ -1,6 +1,8 @@
 import datetime as dt
 import io
+import base64
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import certifi
@@ -249,26 +251,312 @@ def inject_css() -> None:
 
 
 def render_login() -> None:
-    c1, c2, c3 = st.columns([1, 1.5, 1])
-    with c2:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<h1 class='brand'>PULS3</h1>", unsafe_allow_html=True)
-        st.markdown("### When Time, Place, and Risk Align")
-        st.caption("PULS3 Alerts")
-
+    st.markdown(
+        """
+        <style>
+            html, body {
+                background: #f6f6f7 !important;
+            }
+            .stApp {
+                background: #f6f6f7 !important;
+            }
+            .block-container {
+                position: relative;
+                width: 100%;
+                max-width: none !important;
+                min-height: 100vh;
+                margin: 0 auto !important;
+                background: #f6f6f7;
+                padding-top: 80px !important;
+                padding-bottom: 80px !important;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                overflow: visible;
+            }
+            .block-container > div[data-testid="stVerticalBlock"] {
+                width: 100%;
+                max-width: 420px;
+                margin: 0 auto;
+                text-align: center;
+            }
+            .brand-stack {
+                position: relative;
+                z-index: 1;
+                text-align: center;
+                margin: 0 auto 40px;
+                width: 100%;
+            }
+            .brand-logo {
+                width: 220px;
+                max-width: 100%;
+                margin: 0 auto;
+                display: block;
+                margin-bottom: 12px;
+            }
+            .brand-stack .tagline {
+                display: block;
+                text-align: center;
+                max-width: 400px;
+                margin: 0 auto;
+            }
+            .brand-stack .alerts-label {
+                margin: 4px auto 0;
+                text-align: center;
+            }
+            .brand-row {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                margin-bottom: 12px;
+            }
+            .fallback-shield {
+                width: 25px;
+                height: 29px;
+                border-radius: 6px;
+                background: #7a1e24;
+                position: relative;
+            }
+            .fallback-shield::after {
+                content: "";
+                position: absolute;
+                left: 6px;
+                right: 6px;
+                top: 9px;
+                height: 2px;
+                background: #fff;
+                box-shadow: 0 -3px 0 0 #fff, 0 3px 0 0 #fff;
+                opacity: 0.9;
+            }
+            .brand-word {
+                margin: 0;
+                font-size: 44px;
+                line-height: 1;
+                font-weight: 800;
+                letter-spacing: 0.02em;
+                color: #7a1e24;
+            }
+            .tagline {
+                margin: 0;
+                color: #1f1f22;
+                font-size: 19px;
+                font-weight: 500;
+                line-height: 1.3;
+            }
+            .tagline .hi {
+                color: #7a1e24;
+                font-weight: 700;
+            }
+            .alerts-label {
+                color: #7a1e24;
+                letter-spacing: 0.03em;
+                font-size: 13px;
+                font-weight: 700;
+                text-transform: uppercase;
+            }
+            div[data-testid="stForm"] {
+                position: relative;
+                z-index: 1;
+                width: 100%;
+                margin: 0 auto 32px auto;
+                background: #ffffff;
+                border-radius: 16px;
+                border: 1px solid #ebe7ea;
+                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+                padding: 28px !important;
+            }
+            div[data-testid="stForm"] form {
+                border: 0 !important;
+                padding: 0 !important;
+            }
+            div[data-testid="stForm"] .stTextInput label,
+            div[data-testid="stForm"] .stTextInput p {
+                color: #1f1f22 !important;
+                font-weight: 600 !important;
+                font-size: 14px !important;
+            }
+            div[data-testid="stForm"] .stTextInput > div {
+                width: 100% !important;
+            }
+            div[data-testid="stForm"] .stTextInput [data-baseweb="base-input"] {
+                width: 100% !important;
+                position: relative !important;
+            }
+            div[data-testid="stForm"] .stTextInput input {
+                width: 100% !important;
+                height: 48px !important;
+                border: 1px solid #e0e0e0 !important;
+                border-radius: 8px !important;
+                padding: 0 12px !important;
+                background: #ffffff !important;
+                color: #1f1f22 !important;
+                font-size: 16px !important;
+                box-shadow: none !important;
+            }
+            div[data-testid="stForm"] .stTextInput input:focus {
+                border-color: #7a1e24 !important;
+                box-shadow: 0 0 0 3px rgba(122, 30, 36, 0.14) !important;
+                outline: none !important;
+            }
+            div[data-testid="stForm"] .stTextInput input[type="password"] {
+                padding-right: 42px !important;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='19' height='19' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+                background-repeat: no-repeat !important;
+                background-position: right 12px center !important;
+                background-size: 18px 18px !important;
+            }
+            div[data-testid="stForm"] [data-baseweb="input"],
+            div[data-testid="stForm"] [data-baseweb="base-input"] {
+                background: #ffffff !important;
+                border: 0 !important;
+                box-shadow: none !important;
+            }
+            div[data-testid="stForm"] [data-baseweb="base-input"] > div {
+                background: #ffffff !important;
+            }
+            div[data-testid="stForm"] [data-baseweb="base-input"] button,
+            div[data-testid="stForm"] [data-baseweb="input"] button {
+                background: transparent !important;
+                border: 0 !important;
+                color: #9ca3af !important;
+                box-shadow: none !important;
+                position: absolute !important;
+                right: 12px !important;
+                top: 50% !important;
+                transform: translateY(-50%) !important;
+                height: 20px !important;
+                width: 20px !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                z-index: 3 !important;
+                cursor: pointer !important;
+            }
+            div[data-testid="stForm"] .stTextInput input::placeholder {
+                color: #9ca3af !important;
+                opacity: 1;
+            }
+            div[data-testid="stForm"] .stTextInput:nth-of-type(1) {
+                margin-bottom: 20px !important;
+            }
+            div[data-testid="stForm"] .stTextInput:nth-of-type(2) {
+                margin-bottom: 20px !important;
+            }
+            div[data-testid="stForm"] .stButton > button,
+            div[data-testid="stForm"] .stFormSubmitButton > button {
+                height: 48px !important;
+                width: 100% !important;
+                border: 0 !important;
+                border-radius: 8px !important;
+                background: #7a1e24 !important;
+                color: #ffffff !important;
+                font-weight: 600 !important;
+                font-size: 16px !important;
+                box-shadow: 0 8px 16px rgba(122, 30, 36, 0.28) !important;
+            }
+            div[data-testid="stForm"] .stButton > button:hover,
+            div[data-testid="stForm"] .stFormSubmitButton > button:hover {
+                background: #6b1a1f !important;
+            }
+            .login-footer {
+                position: relative;
+                z-index: 1;
+                margin-top: 0;
+                text-align: center;
+            }
+            .account-row {
+                color: #1f1f22;
+                font-size: 14px;
+                margin-bottom: 16px;
+            }
+            .account-row .cta {
+                color: #7a1e24;
+                font-weight: 700;
+            }
+            .legal-row {
+                display: flex;
+                justify-content: center;
+                gap: 28px;
+                color: rgba(31, 31, 34, 0.58);
+                font-size: 12px;
+                letter-spacing: 0.08em;
+                font-weight: 600;
+                text-transform: uppercase;
+                white-space: nowrap;
+                flex-wrap: nowrap;
+            }
+            @media (max-width: 768px) {
+                .block-container {
+                    padding-top: 48px !important;
+                    padding-bottom: 48px !important;
+                }
+                .brand-stack {
+                    margin-bottom: 32px;
+                }
+                .tagline { font-size: 17px; }
+                .alerts-label { font-size: 12px; }
+                .block-container > div[data-testid="stVerticalBlock"] {
+                    max-width: 420px;
+                }
+                div[data-testid="stForm"] { width: 100%; }
+                .account-row {
+                    font-size: 13px;
+                }
+                .legal-row { gap: 14px; font-size: 10px; }
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    logo_path = Path("assets/puls3-logo.png")
+    if logo_path.exists():
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+        brand_top = f"<img class='brand-logo' src='data:image/png;base64,{logo_b64}' alt='PULS3 logo' />"
+    else:
+        brand_top = """
+        <div class="brand-row">
+            <span class="fallback-shield"></span>
+            <h1 class="brand-word">PULS3</h1>
+        </div>
+        """
+    st.markdown(
+        f"""
+        <div class="brand-stack">
+            {brand_top}
+            <p class="tagline">When <span class="hi">Time</span>, <span class="hi">Place</span>, and <span class="hi">Risk</span> Align</p>
+            <p class="alerts-label">PULS3 Alerts</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.form("login_form", clear_on_submit=False, border=False):
         email = st.text_input("Email Address", value=st.session_state.email, placeholder="name@agency.gov")
         password = st.text_input("Password", type="password", placeholder="Enter your password")
+        submitted = st.form_submit_button("Log In", use_container_width=True)
 
-        if st.button("Log In", use_container_width=True):
-            if email.strip() and password.strip():
-                st.session_state.email = email.strip()
-                st.session_state.logged_in = True
-                st.session_state.page = "setup"
-                st.rerun()
-            else:
-                st.warning("Please provide email and password.")
+    if submitted:
+        if email.strip() and password.strip():
+            st.session_state.email = email.strip()
+            st.session_state.logged_in = True
+            st.session_state.page = "setup"
+            st.rerun()
+        else:
+            st.warning("Please provide email and password.")
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="login-footer">
+            <div class="account-row">Don't have an account? <span class="cta">Create Account</span></div>
+            <div class="legal-row">
+                <span>Privacy Policy</span>
+                <span>Terms of Service</span>
+                <span>Support</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_setup(df: pd.DataFrame) -> None:
