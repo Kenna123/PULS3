@@ -339,6 +339,24 @@ def init_state() -> None:
         if k not in st.session_state:
             st.session_state[k] = v
 
+    # Restore auth/page on browser refresh within same URL session.
+    qp_auth = str(st.query_params.get("auth", "")).strip()
+    qp_page = str(st.query_params.get("page", "")).strip().lower()
+    if (not st.session_state.logged_in) and qp_auth == "1":
+        st.session_state.logged_in = True
+        if qp_page in {"setup", "dashboard"}:
+            st.session_state.page = qp_page
+
+
+def set_auth_query_params(logged_in: bool, page: str) -> None:
+    if logged_in:
+        st.query_params["auth"] = "1"
+        st.query_params["page"] = page
+    else:
+        for key in ["auth", "page", "crime"]:
+            if key in st.query_params:
+                del st.query_params[key]
+
 
 def inject_css() -> None:
     st.markdown(
@@ -668,6 +686,7 @@ def render_login() -> None:
             st.session_state.email = email.strip()
             st.session_state.logged_in = True
             st.session_state.page = "setup"
+            set_auth_query_params(True, "setup")
             st.rerun()
         else:
             st.warning("Please provide email and password.")
@@ -938,6 +957,7 @@ def render_setup(df: pd.DataFrame) -> None:
         else:
             st.session_state.monitoring_started = True
             st.session_state.page = "dashboard"
+            set_auth_query_params(True, "dashboard")
             st.rerun()
 
     st.markdown(
@@ -1690,6 +1710,16 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         """,
         unsafe_allow_html=True,
     )
+    logout_col_left, logout_col_right = st.columns([9, 1])
+    with logout_col_right:
+        if st.button("Logout", key="logout_btn", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.page = "login"
+            st.session_state.monitoring_started = False
+            st.session_state.selected_crime = "Assault"
+            st.session_state.selected_crime_user_selected = False
+            set_auth_query_params(False, "login")
+            st.rerun()
     if st.session_state.get("alert_message"):
         st.success(st.session_state["alert_message"])
         st.session_state["alert_message"] = ""
@@ -1944,6 +1974,9 @@ def main() -> None:
         )
         st.exception(exc)
         st.stop()
+
+    if not st.session_state.get("logged_in", False):
+        st.session_state.page = "login"
 
     page = st.session_state.page
     if page == "login":
