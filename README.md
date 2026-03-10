@@ -1,66 +1,59 @@
 # PULS3
 
-PULS3 is a Streamlit-based crime monitoring platform that combines predictive alerts, trend analytics, and high-risk zone visibility in a single dashboard.
+PULS3 is a Streamlit-based crime monitoring platform designed to help visualize crime trends, detect abnormal spikes, and identify high-risk zones within a monitored city.
 
-## Highlights
+The system combines data analytics, time-based comparisons, and automated alerts to provide a simplified early-warning dashboard for crime pattern monitoring.
 
-- Branded login screen, setup flow, and operations dashboard
-- Configurable monitoring area and crime categories
-- Predictive district risk scoring based on your model logic (`PULS3_Model.ipynb`)
-- Real-time style alert feed and crime trend cards
-- Spike analytics panel with 14-day trend and signal summaries
-- High-risk zones ranked by model probability
-- Offline demo fallback when live data feed is unavailable
+---
 
-## Tech Stack
+# Highlights
+
+- Streamlit-based interactive crime monitoring dashboard
+- Branded login screen and onboarding setup flow
+- Crime trend cards comparing recent activity vs historical periods
+- Automatic spike detection for unusual crime increases
+- 14-day trend visualization for selected crime types
+- Growth insights and behavioral pattern indicators
+- High-risk hotspot zone identification
+- Alert system for significant crime increases
+- Exportable crime reports
+
+---
+
+# Tech Stack
 
 - Streamlit
-- Pandas / NumPy
+- Python
+- Pandas
+- NumPy
 - Scikit-learn
-- XGBoost (with RandomForest fallback)
+- Statsmodels (ARIMA forecasting)
 
-## Data + Modeling
+---
 
-- Live source: Chicago Open Data (`ijzp-q8t2` endpoint)
-- Feature engineering and training pattern replicate your notebook:
-  - weekly district aggregation
-  - lag features (`crime_lag1`, `crime_lag2`, `crime_lag3`)
-  - rolling windows (`crime_roll4`, `crime_roll8`)
-  - temporal features (`hour`, `day_of_week`)
+# Data + Modeling
 
-## Local Run
+The dashboard analyzes historical police incident data to detect changes in crime patterns.
 
-```bash
-cd "/Users/agbug/Downloads/PULS3 Project"
-python3 -m pip install -r requirements.txt
-python3 -m streamlit run app.py --server.port 8505
-```
+Key analytical steps include:
 
-Open: [http://localhost:8505](http://localhost:8505)
+- Data cleaning and preprocessing
+- Time-based aggregation of incidents
+- Feature engineering for temporal analysis
+- Crime frequency comparisons across time windows
+- Spike detection using percentage change thresholds
+- ARIMA-based short-term crime forecasting
 
-## Deploy on Streamlit Community Cloud
+Example features used in modeling:
 
-1. Push this project to a GitHub repository.
-2. Go to [share.streamlit.io](https://share.streamlit.io/) and sign in with GitHub.
-3. Click **Create app** and select:
-   - Repository: your PULS3 repo
-   - Branch: `main` (or your deployment branch)
-   - Main file path: `app.py`
-4. Click **Deploy**.
+- Incident date
+- Crime type
+- Temporal indicators (hour, day of week)
+- Rolling crime counts
+- Lagged crime activity
 
-### Runtime Notes
+---
 
-- `requirements.txt` already contains all Python dependencies.
-- `runtime.txt` pins Python to `3.11` for reliable package compatibility on Streamlit Cloud.
-- No extra secrets are required for the current app flow.
+# Dashboard Analytics Pipeline
 
-## Project Files
-
-- `app.py` - main Streamlit application
-- `requirements.txt` - Python dependencies
-- `runtime.txt` - Python version for Streamlit Cloud
-- `.gitignore` - Python/Streamlit ignore rules
-
-## Current Status
-
-Core PULS3 UI and model-backed monitoring flow are implemented and runnable locally.
+The system processes crime data through the following steps:
