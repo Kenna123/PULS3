@@ -1,15 +1,37 @@
 import datetime as dt
-import io
 import base64
+import sqlite3
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
+import re
 
-import certifi
 import numpy as np
 import pandas as pd
-import requests
 import streamlit as st
+import joblib
+try:
+    import matplotlib.pyplot as plt
+
+    HAS_MATPLOTLIB = True
+except Exception:
+    HAS_MATPLOTLIB = False
+    plt = None
+try:
+    from statsmodels.tsa.arima.model import ARIMA
+
+    HAS_STATSMODELS = True
+except Exception:
+    HAS_STATSMODELS = False
+    ARIMA = None
+try:
+    from fpdf import FPDF
+
+    HAS_FPDF = True
+except Exception:
+    HAS_FPDF = False
+    FPDF = None
 
 try:
     from xgboost import XGBClassifier
@@ -40,75 +62,124 @@ THEME = {
 CRIME_OPTIONS = ["Assault", "Robbery", "Theft", "Battery", "Burglary", "Motor Vehicle Theft"]
 
 
+def canonical_crime_name(value: str) -> str:
+    text = str(value or "").strip().lower()
+    mapping = {
+        "assault": "Assault",
+        "robbery": "Robbery",
+        "theft": "Theft",
+    }
+    return mapping.get(text, str(value or "").strip().title())
+
+
 @dataclass
 class ModelBundle:
     model: object
-    encoder: LabelEncoder
+    encoder: Optional[LabelEncoder]
     weekly_data: pd.DataFrame
     features: List[str]
+    source: str = "little_rock"
 
 
-@st.cache_data(show_spinner=False)
-def load_crime_data(limit: int = 200000) -> pd.DataFrame:
-    url = f"https://data.cityofchicago.org/resource/ijzp-q8t2.csv?$limit={limit}"
-    try:
-        resp = requests.get(url, timeout=45, verify=certifi.where())
-        resp.raise_for_status()
-        df = pd.read_csv(io.StringIO(resp.text))
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            "Failed to download Chicago crime data over HTTPS. Check network/SSL certificates."
-        ) from exc
+DATA_DIR = Path("data")
+MODEL_DIR = Path("models")
+ALERT_DB_PATH = DATA_DIR / "puls3_alerts.db"
+
+
+def _normalize_lr_columns(df: pd.DataFrame) -> pd.DataFrame:
+    # Ensure source datetime column is parsed even before normalization.
+    if "INCIDENT_DATE" in df.columns:
+        df["INCIDENT_DATE"] = pd.to_datetime(
+            df["INCIDENT_DATE"], errors="coerce", format="%m/%d/%Y %I:%M:%S %p"
+        )
+        if df["INCIDENT_DATE"].isna().mean() > 0.2:
+            df["INCIDENT_DATE"] = pd.to_datetime(df["INCIDENT_DATE"], errors="coerce")
 
     rename_map = {
         "date": "Date",
+        "incident_date": "Date",
+        "incident_date": "Date",
+        "occurred_at": "Date",
+        "timestamp": "Date",
+        "crime_type": "Primary_Type",
+        "offense": "Primary_Type",
+        "offense_type": "Primary_Type",
+        "offense_description": "Primary_Type",
         "primary_type": "Primary_Type",
         "district": "District",
+        "location_district": "District",
+        "zone": "District",
+        "beat": "District",
+        "neighborhood": "Neighborhood",
+        "area": "Neighborhood",
+        "location": "Neighborhood",
+        "incident_location": "Neighborhood",
+        "zip": "Zipcode",
+        "zipcode": "Zipcode",
+        "zip_code": "Zipcode",
+        "city": "City",
     }
+    lower_to_actual = {str(c).strip().lower(): c for c in df.columns}
+    rename_actual = {}
     for k, v in rename_map.items():
-        if k in df.columns and v not in df.columns:
-            df = df.rename(columns={k: v})
+        actual = lower_to_actual.get(k)
+        if actual and v not in df.columns:
+            rename_actual[actual] = v
+    if rename_actual:
+        df = df.rename(columns=rename_actual)
 
-    required = ["Date", "Primary_Type", "District"]
-    for col in required:
-        if col not in df.columns:
-            raise ValueError(f"Missing expected column: {col}")
+    if "Date" not in df.columns or "Primary_Type" not in df.columns:
+        raise ValueError("Little Rock dataset must include Date and crime type columns.")
 
-    df = df.dropna(subset=required).copy()
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    if "District" not in df.columns:
+        if "Neighborhood" in df.columns:
+            df["District"] = df["Neighborhood"].astype(str)
+        else:
+            df["District"] = "Unknown"
+
+    if "Neighborhood" not in df.columns:
+        df["Neighborhood"] = "District " + df["District"].astype(str)
+    if "City" not in df.columns:
+        df["City"] = "Little Rock"
+    if "Zipcode" not in df.columns:
+        df["Zipcode"] = ""
+
+    df = df.dropna(subset=["Date", "Primary_Type", "District"]).copy()
+    # Parse normalized datetime column; keep robust fallback if format varies.
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce", format="%m/%d/%Y %I:%M:%S %p")
+    if df["Date"].isna().mean() > 0.2:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["Date"]).copy()
+    df["Primary_Type"] = df["Primary_Type"].astype(str).str.upper()
+    # Map LRPD offense descriptions to core monitoring categories used by UI.
+    def _map_primary_type(v: str) -> str:
+        if "ASSAULT" in v:
+            return "Assault"
+        if "ROBBERY" in v:
+            return "Robbery"
+        if "THEFT" in v or "LARCENY" in v or "BURGLARY" in v or "STOLEN" in v:
+            return "Theft"
+        return v.title()
+
+    df["Primary_Type"] = df["Primary_Type"].apply(_map_primary_type)
     df["District"] = df["District"].astype(str)
-    df["Primary_Type"] = df["Primary_Type"].astype(str).str.title()
-    df = df[df["Date"].dt.year >= 2018].copy()
-    df = df.sort_values("Date")
-    return df
+    df["Neighborhood"] = df["Neighborhood"].astype(str)
+    df["City"] = df["City"].astype(str)
+    df["Zipcode"] = df["Zipcode"].astype(str)
+    return df.sort_values("Date")
 
 
 @st.cache_data(show_spinner=False)
-def generate_offline_crime_data(days: int = 240) -> pd.DataFrame:
-    rng = np.random.default_rng(42)
-    end = pd.Timestamp.now().floor("h")
-    start = end - pd.Timedelta(days=days)
-
-    districts = [str(i) for i in range(1, 26)]
-    crime_weights = np.array([0.2, 0.15, 0.28, 0.2, 0.1, 0.07])
-    crime_weights = crime_weights / crime_weights.sum()
-
-    rows = []
-    for ts in pd.date_range(start, end, freq="h"):
-        base_events = rng.poisson(5)
-        for _ in range(base_events):
-            rows.append(
-                {
-                    "Date": ts + pd.Timedelta(minutes=int(rng.integers(0, 60))),
-                    "Primary_Type": rng.choice(CRIME_OPTIONS, p=crime_weights),
-                    "District": rng.choice(districts),
-                }
-            )
-
-    df = pd.DataFrame(rows)
-    df = df.sort_values("Date")
-    return df
+def load_little_rock_data() -> pd.DataFrame:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    candidates = list(DATA_DIR.glob("*.csv"))
+    if not candidates:
+        raise FileNotFoundError(
+            "No Little Rock dataset found. Place your exported CSV in ./data/ (e.g., data/little_rock_crime.csv)."
+        )
+    latest = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    df = pd.read_csv(latest)
+    return _normalize_lr_columns(df)
 
 
 @st.cache_resource(show_spinner=False)
@@ -174,7 +245,29 @@ def build_model(df: pd.DataFrame) -> ModelBundle:
         model = RandomForestClassifier(n_estimators=300, random_state=42)
 
     model.fit(X, y)
-    return ModelBundle(model=model, encoder=le, weekly_data=weekly, features=features)
+    return ModelBundle(model=model, encoder=le, weekly_data=weekly, features=features, source="little_rock_trained")
+
+
+@st.cache_resource(show_spinner=False)
+def load_model_bundle(df: pd.DataFrame) -> ModelBundle:
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    artifact_candidates = list(MODEL_DIR.glob("*.joblib")) + list(MODEL_DIR.glob("*.pkl"))
+    if artifact_candidates:
+        artifact = sorted(artifact_candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+        loaded = joblib.load(artifact)
+        if isinstance(loaded, ModelBundle):
+            return loaded
+        if isinstance(loaded, dict):
+            required = {"model", "weekly_data", "features"}
+            if required.issubset(set(loaded.keys())):
+                return ModelBundle(
+                    model=loaded["model"],
+                    encoder=loaded.get("encoder"),
+                    weekly_data=loaded["weekly_data"],
+                    features=list(loaded["features"]),
+                    source=f"artifact:{artifact.name}",
+                )
+    return build_model(df)
 
 
 def get_latest_zone_risk(bundle: ModelBundle) -> pd.DataFrame:
@@ -204,6 +297,8 @@ def init_state() -> None:
         "email": "",
         "location": "",
         "selected_crimes": ["Assault"],
+        "selected_crime": "Assault",
+        "active_crime": "Assault",
         "logged_in": False,
         "monitoring_started": False,
     }
@@ -753,6 +848,8 @@ def render_setup(df: pd.DataFrame) -> None:
     st.markdown(logo_markup, unsafe_allow_html=True)
 
     district_options = sorted(df["District"].dropna().unique().tolist())
+    city_options = ["Little Rock"]
+    default_city_idx = 0
     if "selected_districts" not in st.session_state:
         st.session_state["selected_districts"] = district_options
     setup_crime_options = ["Assault", "Robbery", "Theft"]
@@ -764,13 +861,13 @@ def render_setup(df: pd.DataFrame) -> None:
         st.markdown("<h2 class='setup-title'>Set Up Monitoring</h2>", unsafe_allow_html=True)
         st.markdown("<p class='setup-sub'>Choose your area and select crimes to monitor</p>", unsafe_allow_html=True)
         st.markdown("<p class='section-label'>Monitoring Area</p>", unsafe_allow_html=True)
-        location_input = st.text_input(
+        selected_city = st.selectbox(
             "Monitoring Area",
-            value="",
-            placeholder="Search for city or zip code",
+            options=city_options,
+            index=default_city_idx,
             label_visibility="collapsed",
         )
-        st.markdown("<div class='helper-text'>Example: Little Rock, AR</div>", unsafe_allow_html=True)
+        st.markdown("<div class='helper-text'>City-level monitoring</div>", unsafe_allow_html=True)
 
         st.markdown("<p class='section-label'>Crime Types To Monitor</p>", unsafe_allow_html=True)
         selected_now = st.multiselect(
@@ -787,11 +884,22 @@ def render_setup(df: pd.DataFrame) -> None:
         )
 
     if submitted:
-        st.session_state.location = location_input.strip() or "Little Rock, AR"
-        st.session_state.selected_crimes = selected_now
-        st.session_state["selected_districts"] = district_options
+        city_mask = df["City"].astype(str).str.upper().str.contains("LITTLE ROCK", na=False)
+        scoped = df[city_mask]
+        scoped_districts = sorted(scoped["District"].dropna().astype(str).unique().tolist())
+        if not scoped_districts:
+            st.error(f"No monitored districts found for city {selected_city}.")
+            return
 
-        if not st.session_state.selected_crimes:
+        st.session_state.location = "Little Rock"
+        normalized_selection = [canonical_crime_name(c) for c in selected_now]
+        st.session_state.selected_crimes = normalized_selection
+        if normalized_selection:
+            st.session_state.selected_crime = normalized_selection[0]
+            st.session_state.active_crime = normalized_selection[0]
+        st.session_state["selected_districts"] = scoped_districts
+
+        if not normalized_selection:
             st.warning("Select at least one crime type.")
         else:
             st.session_state.monitoring_started = True
@@ -805,19 +913,42 @@ def render_setup(df: pd.DataFrame) -> None:
 
 
 def crime_type_trends(df: pd.DataFrame, selected_crimes: List[str]) -> pd.DataFrame:
-    now = df["Date"].max()
-    last_24h = df[df["Date"] >= now - pd.Timedelta(hours=24)]
-    prev_24h = df[(df["Date"] < now - pd.Timedelta(hours=24)) & (df["Date"] >= now - pd.Timedelta(hours=48))]
+    if df.empty:
+        return pd.DataFrame(
+            [{"crime": c, "current": 0, "previous": 0, "pct_change": 0.0, "low_data": True} for c in selected_crimes]
+        )
+
+    # Ensure timestamp column is datetime before window math.
+    if not np.issubdtype(df["Date"].dtype, np.datetime64):
+        df = df.copy()
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.dropna(subset=["Date"])
+        if df.empty:
+            return pd.DataFrame(
+                [{"crime": c, "current": 0, "previous": 0, "pct_change": 0.0, "low_data": True} for c in selected_crimes]
+            )
+
+    today = df["Date"].max()
+    current_start = today - pd.Timedelta(days=30)
+    previous_start = today - pd.Timedelta(days=60)
+    current_period = df[(df["Date"] >= current_start) & (df["Date"] <= today)]
+    previous_period = df[(df["Date"] >= previous_start) & (df["Date"] < current_start)]
 
     rows = []
     for c in selected_crimes:
-        now_count = int((last_24h["Primary_Type"] == c).sum())
-        prev_count = int((prev_24h["Primary_Type"] == c).sum())
-        if prev_count == 0:
-            pct = 100.0 if now_count > 0 else 0.0
-        else:
-            pct = ((now_count - prev_count) / prev_count) * 100
-        rows.append({"crime": c, "current": now_count, "previous": prev_count, "pct_change": pct})
+        crime_name = canonical_crime_name(c)
+        current = int((current_period["Primary_Type"] == crime_name).sum())
+        previous = int((previous_period["Primary_Type"] == crime_name).sum())
+        pct = ((current - previous) / max(previous, 1)) * 100
+        rows.append(
+            {
+                "crime": crime_name,
+                "current": current,
+                "previous": previous,
+                "pct_change": pct,
+                "low_data": False,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -826,7 +957,7 @@ def get_alert_log(df: pd.DataFrame, selected_crimes: List[str], districts: List[
     if districts:
         filtered = filtered[filtered["District"].isin(districts)]
 
-    rec = filtered.sort_values("Date", ascending=False).head(8).copy()
+    rec = filtered.sort_values("Date", ascending=False).head(5).copy()
     rec["Time"] = rec["Date"].dt.strftime("%I:%M %p")
     rec["Type"] = rec["Primary_Type"]
     rec["Location"] = "District " + rec["District"].astype(str)
@@ -843,120 +974,731 @@ def get_alert_log(df: pd.DataFrame, selected_crimes: List[str], districts: List[
     return rec[["Time", "Type", "Location", "Severity"]]
 
 
-def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
-    selected_crimes = st.session_state.selected_crimes
-    location = st.session_state.location
-    selected_districts = st.session_state.get("selected_districts", [])
-    filtered_df = df[df["Primary_Type"].isin(selected_crimes)].copy()
-    if filtered_df.empty:
-        filtered_df = df.copy()
+def resolve_location_filter(df: pd.DataFrame, location_text: str) -> pd.DataFrame:
+    q = (location_text or "").strip().lower()
+    if not q:
+        return df
+    mask = pd.Series(False, index=df.index)
+    for col in ["City", "Zipcode", "Neighborhood", "District"]:
+        if col in df.columns:
+            mask = mask | df[col].astype(str).str.lower().str.contains(q, na=False)
+    filtered = df[mask]
+    return filtered
 
-    st.markdown(
-        f"""
-        <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;'>
-            <h2 style='margin:0;' class='brand'>PULS3</h2>
-            <div style='color:{THEME['muted']}; font-weight:600;'>📍 {location}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+
+def normalize_zip(value: str) -> str:
+    m = re.search(r"\b(\d{5})\b", str(value or ""))
+    return m.group(1) if m else ""
+
+
+def get_little_rock_zipcodes(df: pd.DataFrame) -> set:
+    z = (
+        df.get("Zipcode", pd.Series([], dtype=str))
+        .astype(str)
+        .str.extract(r"(\d{5})", expand=False)
+        .dropna()
     )
-    if st.session_state.get("data_source") == "offline":
-        st.info("Offline demo mode: live Chicago feed unavailable, using simulated crime data.")
+    return set(z.tolist())
+
+
+def get_zone_counts(df: pd.DataFrame, crime: str, days: int = 14) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["zone", "count", "severity"])
+    end = df["Date"].max()
+    start = end - pd.Timedelta(days=days)
+    scoped = df[(df["Date"] >= start) & (df["Date"] <= end)].copy()
+    scoped = scoped[scoped["Primary_Type"] == crime]
+    zone_col = "Neighborhood" if "Neighborhood" in scoped.columns else "District"
+    counts = scoped.groupby(zone_col).size().reset_index(name="count").sort_values("count", ascending=False)
+    if counts.empty:
+        return pd.DataFrame(columns=["zone", "count", "severity"])
+    counts = counts.rename(columns={zone_col: "zone"})
+    counts = counts.head(3).reset_index(drop=True)
+    severity_scale = ["Critical", "Elevated", "Moderate"]
+    counts["severity"] = [severity_scale[i] for i in range(len(counts))]
+    return counts
+
+
+def get_peak_hours_and_pattern(df: pd.DataFrame, crime: str) -> Tuple[str, str]:
+    scoped = df[df["Primary_Type"] == crime].copy()
+    if scoped.empty:
+        return "8PM-11PM", "Pattern unavailable"
+    scoped["hour"] = scoped["Date"].dt.hour
+    peak_hour = int(scoped["hour"].mode().iloc[0])
+    end_hour = (peak_hour + 3) % 24
+    peak_hours = f"{peak_hour:02d}:00-{end_hour:02d}:00"
+    weekend_share = scoped["Date"].dt.dayofweek.isin([5, 6]).mean()
+    night_share = scoped["hour"].isin([20, 21, 22, 23, 0, 1, 2, 3]).mean()
+    if weekend_share > 0.4:
+        pattern = "Weekend clustering"
+    elif night_share > 0.45:
+        pattern = "Night-time spike"
+    else:
+        pattern = "Weekday spread"
+    return peak_hours, pattern
+
+
+def arima_forecast_next_7(df: pd.DataFrame, crime: str) -> Tuple[pd.Series, pd.Series]:
+    scoped = df[df["Primary_Type"] == crime].copy()
+    if scoped.empty:
+        empty_idx = pd.date_range(pd.Timestamp.now().normalize(), periods=7, freq="D")
+        z = pd.Series([0.0] * 7, index=empty_idx, name="forecast")
+        return z, z
+    daily = scoped.set_index("Date").resample("D").size().astype(float).rename("incidents")
+    daily = daily.tail(90)
+    if HAS_STATSMODELS:
+        try:
+            model = ARIMA(daily, order=(2, 1, 2))
+            fit = model.fit()
+            fc = fit.forecast(steps=7).rename("forecast")
+            fc[fc < 0] = 0.0
+        except Exception:
+            avg = float(daily.tail(14).mean()) if not daily.empty else 0.0
+            idx = pd.date_range(daily.index.max() + pd.Timedelta(days=1), periods=7, freq="D")
+            fc = pd.Series([avg] * 7, index=idx, name="forecast")
+    else:
+        avg = float(daily.tail(14).mean()) if not daily.empty else 0.0
+        idx = pd.date_range(daily.index.max() + pd.Timedelta(days=1), periods=7, freq="D")
+        fc = pd.Series([avg] * 7, index=idx, name="forecast")
+    return daily, fc
+
+
+def ensure_alert_db() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(ALERT_DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                crime_type TEXT NOT NULL,
+                location TEXT NOT NULL,
+                severity TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def insert_alert(crime_type: str, location: str, severity: str) -> None:
+    ensure_alert_db()
+    with sqlite3.connect(ALERT_DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO alerts(created_at, crime_type, location, severity) VALUES (?, ?, ?, ?)",
+            (dt.datetime.now().isoformat(), crime_type, location, severity),
+        )
+        conn.commit()
+
+
+def fetch_recent_alerts(limit: int = 12) -> pd.DataFrame:
+    ensure_alert_db()
+    with sqlite3.connect(ALERT_DB_PATH) as conn:
+        df = pd.read_sql_query(
+            "SELECT created_at, crime_type, location, severity FROM alerts ORDER BY id DESC LIMIT ?",
+            conn,
+            params=(limit,),
+        )
+    if df.empty:
+        return pd.DataFrame(columns=["Time", "Type", "Location", "Severity"])
+    dt_col = pd.to_datetime(df["created_at"], errors="coerce")
+    out = pd.DataFrame(
+        {
+            "Time": dt_col.dt.strftime("%I:%M %p").fillna(""),
+            "Type": df["crime_type"].astype(str),
+            "Location": df["location"].astype(str),
+            "Severity": df["severity"].astype(str),
+        }
+    )
+    return out
+
+
+def build_pdf_report(
+    location: str,
+    selected_crime: str,
+    percent_change: float,
+    current_count: int,
+    previous_count: int,
+    spike_detected: bool,
+    high_risk_zones: pd.DataFrame,
+    peak_hours: str,
+    pattern: str,
+    forecast_summary: str,
+    trend_series: pd.Series,
+) -> bytes:
+    if not HAS_FPDF:
+        raise RuntimeError("PDF generation requires the 'fpdf' package.")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "PULS3 Crime Risk Report", ln=True)
+    pdf.ln(2)
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 8, f"Generated: {dt.datetime.now().strftime('%Y-%m-%d %I:%M %p')}", ln=True)
+    pdf.cell(0, 8, f"Location: {location or 'Little Rock'}", ln=True)
+    pdf.cell(0, 8, f"Crime Type: {selected_crime}", ln=True)
+    pdf.cell(0, 8, f"30-day Change: {percent_change:+.1f}% (Current: {current_count} | Previous: {previous_count})", ln=True)
+    pdf.cell(0, 8, f"Spike Status: {'Spike Detected' if spike_detected else 'No Spike'}", ln=True)
+    pdf.ln(4)
+    pdf.multi_cell(
+        0,
+        8,
+        f"{selected_crime} incidents changed {percent_change:+.1f}% in the last 30 days.\n"
+        f"Peak incident hours: {peak_hours}.\n"
+        f"Pattern detected: {pattern}.\n"
+        f"{forecast_summary}",
+    )
+    if HAS_MATPLOTLIB and (not trend_series.empty):
+        temp_chart_path = None
+        try:
+            fig, ax = plt.subplots(figsize=(6.4, 2.4))
+            ax.plot(trend_series.index, trend_series.values, color="#8B1D2C", linewidth=2.5)
+            ax.set_title(f"{selected_crime} - Past 14 Days Trend", fontsize=10)
+            ax.grid(alpha=0.2)
+            fig.autofmt_xdate()
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                temp_chart_path = tmp.name
+            fig.savefig(temp_chart_path, dpi=140, bbox_inches="tight")
+            plt.close(fig)
+            pdf.ln(2)
+            pdf.image(temp_chart_path, w=180)
+        except Exception:
+            try:
+                plt.close("all")
+            except Exception:
+                pass
+        finally:
+            if temp_chart_path:
+                try:
+                    Path(temp_chart_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+    pdf.ln(2)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, "High-Risk Zones", ln=True)
+    pdf.set_font("Arial", "", 11)
+    if high_risk_zones.empty:
+        pdf.cell(0, 8, "No hotspot zones available.", ln=True)
+    else:
+        for _, row in high_risk_zones.head(3).iterrows():
+            pdf.cell(0, 8, f"{row['zone']} - {row['severity']}", ln=True)
+    out = pdf.output(dest="S")
+    if isinstance(out, str):
+        return out.encode("latin-1", errors="ignore")
+    return bytes(out)
+
+
+def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
+    selected_crimes = ["Assault", "Robbery", "Theft"]
+    st.session_state.selected_crimes = selected_crimes
+    selected_city = (st.session_state.location or "Little Rock").strip()
+    if "LITTLE ROCK" not in selected_city.upper():
+        selected_city = "Little Rock"
+        st.session_state.location = "Little Rock"
+    location = "Little Rock"
+    city_series = df["City"].astype(str)
+    location_df = df[city_series.str.contains("LITTLE ROCK", case=False, na=False)].copy()
+    if location_df.empty:
+        location_df = df.copy()
+    selected_districts = sorted(location_df["District"].dropna().astype(str).unique().tolist())
+    if not selected_districts:
+        selected_districts = st.session_state.get("selected_districts", [])
+    # Overview cards should be computed on city data; crime-level splits are done inside crime_type_trends.
+    filtered_df = location_df[
+        location_df["Primary_Type"].astype(str).str.strip().str.lower().isin([c.lower() for c in selected_crimes])
+    ].copy()
+    if filtered_df.empty:
+        filtered_df = location_df.copy()
+
+    selected_crime = canonical_crime_name(st.session_state.get("selected_crime", "Assault"))
+    if selected_crime not in selected_crimes:
+        selected_crime = selected_crimes[0]
+    st.session_state.selected_crime = selected_crime
+    st.session_state.active_crime = selected_crime
+    selected_crime_df = location_df[location_df["Primary_Type"] == selected_crime].copy()
 
     risk_df = get_latest_zone_risk(bundle)
     if selected_districts:
         risk_df = risk_df[risk_df["District"].isin(selected_districts)]
+    system_status = "NORMAL"
 
-    top = risk_df.iloc[0] if not risk_df.empty else None
-    warning_msg = (
-        f"Early Warning: {selected_crimes[0]} risk rising in District {top['District']}"
-        if top is not None
-        else "Early Warning: Insufficient model signal"
-    )
-    st.markdown(f"<div class='banner'>SYSTEM STATUS: ELEVATED &nbsp;&nbsp; | &nbsp;&nbsp; {warning_msg}</div>", unsafe_allow_html=True)
-
-    st.write("")
-    st.subheader("Crime Type Trends (Last 24h)")
     trends = crime_type_trends(filtered_df, selected_crimes)
-    cols = st.columns(max(1, len(selected_crimes)))
+    alerts = fetch_recent_alerts(limit=5)
+    if alerts.empty:
+        alerts = get_alert_log(filtered_df, selected_crimes, selected_districts)
+
+    focus = trends[trends["crime"] == selected_crime].head(1)
+    if focus.empty:
+        focus_row = pd.Series({"crime": selected_crime, "current": 0, "previous": 0, "pct_change": 0.0})
+    else:
+        focus_row = focus.iloc[0]
+    spike_detected = (
+        float(focus_row["pct_change"]) >= 10.0
+        and int(focus_row["current"]) >= 5
+    )
+    system_status = "ELEVATED" if spike_detected else "NORMAL"
+
+    history_daily, forecast_7 = arima_forecast_next_7(selected_crime_df, selected_crime)
+    trend_src = history_daily.tail(14).rename("incidents")
+    if trend_src.empty:
+        trend_src = pd.Series([0, 1, 0, 2, 3, 2, 4], index=pd.date_range(dt.datetime.now(), periods=7, freq="D"), name="incidents")
+
+    if len(history_daily) >= 14:
+        prev7 = float(history_daily.iloc[-14:-7].sum())
+        last7 = float(history_daily.iloc[-7:].sum())
+        growth = ((last7 - prev7) / max(prev7, 1.0)) * 100
+    else:
+        growth = 0.0
+
+    peak_hours_txt, pattern_txt = get_peak_hours_and_pattern(selected_crime_df, selected_crime)
+    zone_counts = get_zone_counts(selected_crime_df, selected_crime, days=14)
+    top_zone = zone_counts.iloc[0]["zone"] if not zone_counts.empty else "Little Rock Core"
+    top_sev = zone_counts.iloc[0]["severity"] if not zone_counts.empty else "Moderate"
+    forecast_summary = (
+        f"Expected incidents next week: {forecast_7.sum():.1f} total ({forecast_7.mean():.1f}/day average)."
+        if not forecast_7.empty
+        else "ARIMA forecasting unavailable due to insufficient data."
+    )
+
+    st.markdown(
+        """
+        <style>
+            .topbar {
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 14px 28px; background: white; border-bottom: 1px solid #E5E7EB;
+                border-radius: 12px; margin-bottom: 18px;
+            }
+            .logo{ font-weight:800; color:#7A1E24; font-size:20px; }
+            .location {
+                background: #F3F4F6; padding: 8px 16px; border-radius: 10px;
+                font-weight: 500; color: #374151; min-width: 340px; text-align: center;
+            }
+            .user-icons { display: flex; gap: 16px; font-size: 18px; color: #374151; }
+            .status-banner{
+                background:#8B1D2C; color:white; padding:16px 22px; border-radius:12px; margin-top:18px; margin-bottom: 18px;
+                display:flex; justify-content:space-between; align-items:center; font-weight:600;
+            }
+            .trend-wrap-title {
+                margin: 10px 0 14px; color: #1f2937; font-size: 34px; font-weight: 700;
+            }
+            .trend-card {
+                background: white; border: 1px solid #E5E7EB; border-radius: 14px; padding: 22px;
+                min-height: 120px; position: relative;
+            }
+            .trend-card.active { border: 2px solid #8B1D2C; box-shadow: 0 0 0 2px rgba(139,29,44,0.08) inset; }
+            .trend-select {
+                margin-top: 8px;
+            }
+            .trend-select button {
+                width: 100% !important;
+                background: #ffffff !important;
+                color: #7A1E24 !important;
+                border: 1px solid #E5E7EB !important;
+                border-radius: 10px !important;
+                font-weight: 700 !important;
+            }
+            .trend-title {
+                font-size: 12px; letter-spacing: .08em; color: #6B7280; font-weight: 700; text-transform: uppercase;
+            }
+            .trend-value { font-size: 32px; font-weight: 800; margin-top: 10px; }
+            .trend-meta { margin-top: 6px; color: #6B7280; font-size: 13px; }
+            .trend-icon {
+                position: absolute; right: 18px; top: 18px; font-size: 18px; color: #8B1D2C;
+            }
+            .dash-card {
+                border: 1px solid #e4dfe1; border-radius: 14px; background: #fff; overflow: hidden;
+                margin-top: 16px;
+            }
+            .dash-card-head {
+                padding: 16px 22px; border-bottom: 1px solid #ece8ea; display:flex; justify-content:space-between; align-items:center;
+                font-size: 32px; font-weight: 700; color: #1f2937;
+            }
+            .dash-table { width: 100%; border-collapse: collapse; }
+            .dash-table th {
+                text-align: left; font-size: 17px; color: #7a6b70; text-transform: uppercase; letter-spacing: .04em; padding: 14px 22px;
+                background: #f8f6f7;
+            }
+            .dash-table td { padding: 14px 22px; border-top: 1px solid #f0ecee; font-size: 27px; color: #202126; }
+            .sev-chip { border-radius: 999px; font-size: 16px; font-weight: 700; padding: 4px 10px; display: inline-block; }
+            .sev-critical { background:#f9e6ea; color:#a71935; }
+            .sev-elevated { background:#fff0df; color:#cf5c00; }
+            .sev-moderate { background:#fff8de; color:#ac7b00; }
+            .sev-low { background:#e8f6ef; color:#0f9f6e; }
+            .analysis-wrap { padding: 20px 22px 22px; }
+            .analysis-title { margin: 0; font-size: 46px; color:#201f22; font-weight: 800; }
+            .analysis-sub { margin: 2px 0 16px; color:#7a6b70; font-size: 27px; }
+            .risk-title { margin: 0 0 12px; font-size: 23px; letter-spacing: .06em; text-transform: uppercase; color:#7a6b70; }
+            .risk-row {
+                display:flex; justify-content:space-between; border-radius: 10px; padding: 10px 12px;
+                margin-bottom: 10px; border: 1px solid #eee7ea; font-size: 26px;
+            }
+            .kpi {
+                border: 1px solid #ece8ea; border-radius: 12px; background: #fff; padding: 12px 14px;
+                margin-top: 10px;
+            }
+            .kpi-label { color:#7a6b70; font-size: 16px; text-transform: uppercase; letter-spacing:.04em; font-weight:700; }
+            .kpi-val { color:#1f2937; font-size: 30px; font-weight:700; margin-top:4px; }
+            .dash-footer {
+                margin-top: 22px; color: #7a6b70; font-size: 17px; display: flex; justify-content: space-between;
+                border-top: 1px solid #e5e1e3; padding-top: 14px;
+            }
+            .spike-card{
+                background:white;
+                border-radius:18px;
+                border:1px solid #E5E7EB;
+                padding:30px;
+                margin-top:20px;
+            }
+            .spike-header{
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                margin-bottom:20px;
+                gap: 18px;
+            }
+            .spike-header h2{
+                margin:0;
+                color:#1f2937;
+                font-size:46px;
+                font-weight:800;
+            }
+            .spike-sub{
+                color:#6B7280;
+                margin-top:4px;
+                font-size:27px;
+            }
+            .spike-actions{
+                display:flex;
+                align-items:center;
+            }
+            .alert-btn{
+                background:#8B1D2C;
+                color:white;
+                border:none;
+                padding:10px 16px;
+                border-radius:8px;
+                font-weight:600;
+                margin-right:10px;
+            }
+            .download-btn{
+                background:white;
+                border:1px solid #E5E7EB;
+                padding:10px 16px;
+                border-radius:8px;
+            }
+            .trend-box{
+                border:1px dashed #E5E7EB;
+                border-radius:14px;
+                padding:18px;
+            }
+            .trend-label{
+                font-size:12px;
+                letter-spacing:.08em;
+                color:#6B7280;
+                margin-bottom:10px;
+                text-transform: uppercase;
+                font-weight: 700;
+            }
+            .risk-title{
+                font-size:12px;
+                letter-spacing:.08em;
+                color:#6B7280;
+                margin-bottom:12px;
+                text-transform: uppercase;
+                font-weight: 700;
+            }
+            .risk-item{
+                display:flex;
+                justify-content:space-between;
+                padding:14px 16px;
+                border-radius:10px;
+                margin-bottom:12px;
+                font-weight:600;
+            }
+            .risk-critical{
+                background:#FDECEC;
+                color:#991B1B;
+                border-left:6px solid #991B1B;
+            }
+            .risk-elevated{
+                background:#FFF3E8;
+                color:#C2410C;
+                border-left:6px solid #F97316;
+            }
+            .risk-moderate{
+                background:#FFF8E1;
+                color:#B45309;
+                border-left:6px solid #F59E0B;
+            }
+            .risk-low{
+                background:#ECFDF5;
+                color:#047857;
+                border-left:6px solid #10B981;
+            }
+            .risk-badge{
+                font-weight:700;
+            }
+            .insight-card{
+                background:#F9FAFB;
+                border-radius:12px;
+                padding:18px;
+                border:1px solid #E5E7EB;
+            }
+            .insight-title{
+                font-size:12px;
+                color:#6B7280;
+                letter-spacing:.08em;
+                text-transform: uppercase;
+                font-weight: 700;
+            }
+            .insight-value{
+                font-size:20px;
+                font-weight:700;
+                margin-top:6px;
+                color:#1f2937;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class="topbar">
+            <div class="logo">🛡 PULS3</div>
+            <div class="location">📍 {location or 'Little Rock, AR'}</div>
+            <div class="user-icons">🔔 👤</div>
+        </div>
+        <div class="status-banner">
+            <div class="status-left">🛡 SYSTEM STATUS: {system_status}</div>
+            <div class="status-right">{'Early Warning: ' + selected_crime + ' - ' + location if spike_detected else 'No elevated warning - ' + location}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.session_state.get("alert_message"):
+        st.success(st.session_state["alert_message"])
+        st.session_state["alert_message"] = ""
+
+    st.markdown("<div class='trend-wrap-title'>Crime Type Trends (Last 30 Days)</div>", unsafe_allow_html=True)
+    st.caption("Compared to previous 30-day period.")
+    cols = st.columns(3)
     for i, row in trends.iterrows():
-        with cols[i % len(cols)]:
-            color = THEME["bad"] if row["pct_change"] > 0 else THEME["good"]
-            direction = "Increase" if row["pct_change"] > 0 else "Decrease"
+        if i > 2:
+            break
+        with cols[i]:
+            is_up = row["pct_change"] > 0
+            change_color = "#8B1D2C" if is_up else "#1F9D66"
+            if row["pct_change"] > 0:
+                direction = "Increase"
+                trend_icon = "↗"
+            elif row["pct_change"] < 0:
+                direction = "Decrease"
+                trend_icon = "↘"
+            else:
+                direction = "No Change"
+                trend_icon = "→"
+            active_class = " active" if row["crime"] == selected_crime else ""
             st.markdown(
                 f"""
-                <div class='metric'>
-                    <h4>{row['crime']}</h4>
-                    <div style='font-size:34px; font-weight:800; color:{color};'>{abs(row['pct_change']):.0f}% {direction}</div>
-                    <div style='color:{THEME['muted']};'>Current: {int(row['current'])} | Previous: {int(row['previous'])}</div>
+                <div class='trend-card{active_class}'>
+                    <div class='trend-title'>{row['crime'].upper()}</div>
+                    <div class='trend-icon' style='color:{change_color};'>{trend_icon}</div>
+                    <div class='trend-value' style='color:{change_color};'>
+                        {f"{abs(row['pct_change']):.0f}% {direction}"}
+                    </div>
+                    <div class='trend-meta'>
+                        Current: {int(row['current'])} | Previous: {int(row['previous'])}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div class='trend-select'>", unsafe_allow_html=True)
+            if st.button(f"Select {row['crime']}", key=f"select_crime_{row['crime']}", use_container_width=True):
+                st.session_state.selected_crime = row["crime"]
+                st.session_state.active_crime = row["crime"]
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.caption(f"Selected Crime: {selected_crime}")
+
+    def render_spike_header() -> None:
+        if spike_detected:
+            title_txt = f"+{abs(focus_row['pct_change']):.0f}% Spike Detected - {selected_crime}"
+            sub_txt = f"{selected_crime} incidents are increasing faster than expected"
+        elif float(focus_row["pct_change"]) < 0:
+            title_txt = f"{abs(focus_row['pct_change']):.0f}% Decrease - {selected_crime}"
+            sub_txt = f"{selected_crime} incidents are lower than the previous 30-day period."
+        else:
+            title_txt = f"No Significant Spike - {selected_crime}"
+            sub_txt = f"{selected_crime} incident activity is currently within expected range."
+        st.markdown(
+            f"""
+            <div class="spike-header">
+                <div>
+                    <h2>{title_txt}</h2>
+                    <p class="spike-sub">{sub_txt}</p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        a1, a2 = st.columns([1, 1])
+        with a1:
+            if st.button(
+                "🛡 Alert Police Department",
+                key=f"alert_police_{selected_crime}",
+                use_container_width=True,
+                disabled=not spike_detected,
+            ):
+                insert_alert(selected_crime, str(top_zone), str(top_sev))
+                st.session_state["alert_message"] = "Police Department Alert Triggered"
+                st.rerun()
+        with a2:
+            if HAS_FPDF:
+                report_bytes = build_pdf_report(
+                    location=location or "Little Rock",
+                    selected_crime=selected_crime,
+                    percent_change=float(focus_row["pct_change"]),
+                    current_count=int(focus_row["current"]),
+                    previous_count=int(focus_row["previous"]),
+                    spike_detected=spike_detected,
+                    high_risk_zones=zone_counts,
+                    peak_hours=peak_hours_txt,
+                    pattern=pattern_txt,
+                    forecast_summary=forecast_summary,
+                    trend_series=trend_src,
+                )
+                st.download_button(
+                    "⬇ Download Report",
+                    data=report_bytes,
+                    file_name="puls3_crime_report.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    disabled=False,
+                    key=f"download_report_{selected_crime}",
+                )
+            else:
+                st.download_button(
+                    "⬇ Download Report",
+                    data=b"",
+                    file_name="puls3_crime_report.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    disabled=True,
+                    key=f"download_report_{selected_crime}_disabled",
+                )
+                st.caption("Install `fpdf2` to enable PDF report downloads.")
+
+    def render_spike_body() -> None:
+        chart_col, risk_col = st.columns([2.2, 1])
+        with chart_col:
+            st.markdown(
+                """
+                <div class="trend-box">
+                <div class="trend-label">PAST 14 DAYS TREND</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            smooth_src = trend_src.rolling(3, min_periods=1).mean()
+            st.line_chart(smooth_src, color="#8B1D2C")
+            if not forecast_7.empty:
+                st.caption(
+                    f"Expected incidents next week: {forecast_7.sum():.1f}"
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with risk_col:
+            st.markdown('<div class="risk-title">HIGH-RISK ZONES</div>', unsafe_allow_html=True)
+            if zone_counts.empty:
+                st.caption("No hotspot locations available.")
+            for _, row in zone_counts.head(3).iterrows():
+                sev = row["severity"]
+                color_class = {
+                    "Critical": "risk-critical",
+                    "Elevated": "risk-elevated",
+                    "Moderate": "risk-moderate",
+                    "Low": "risk-low",
+                }.get(sev, "risk-low")
+                st.markdown(
+                    f"""
+                    <div class="risk-item {color_class}">
+                        <span>{row['zone']}</span>
+                        <span class="risk-badge">{sev.upper()}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    def render_spike_insights() -> None:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <div class="insight-title">GROWTH RATE</div>
+                    <div class="insight-value">{growth:+.1f}% last 7 days</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with c2:
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <div class="insight-title">PEAK HOURS</div>
+                    <div class="insight-value">{peak_hours_txt}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with c3:
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <div class="insight-title">PATTERN</div>
+                    <div class="insight-value">{pattern_txt}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-    st.write("")
-    st.subheader("Recent Alert Log")
-    alerts = get_alert_log(filtered_df, selected_crimes, selected_districts)
-    st.dataframe(alerts, use_container_width=True, hide_index=True)
+    st.markdown('<div class="spike-card">', unsafe_allow_html=True)
+    render_spike_header()
+    render_spike_body()
+    render_spike_insights()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.write("")
-    if not trends.empty:
-        focus = trends.sort_values("pct_change", ascending=False).iloc[0]
-    else:
-        focus = pd.Series({"crime": "Assault", "pct_change": 0.0})
-
-    left, right = st.columns([2, 1.1])
-    with left:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown(f"### {focus['pct_change']:+.0f}% Spike Detected - {focus['crime']}")
-        st.caption(f"{focus['crime']} incidents are changing vs prior 24-hour baseline.")
-
-        trend_src = (
-            filtered_df[filtered_df["Primary_Type"] == focus["crime"]]
-            .set_index("Date")
-            .resample("D")
-            .size()
-            .tail(14)
-            .rename("incidents")
+    severity_css = {
+        "critical": "sev-critical",
+        "elevated": "sev-elevated",
+        "moderate": "sev-moderate",
+        "low": "sev-low",
+    }
+    alert_rows = ""
+    for _, row in alerts.head(5).iterrows():
+        sev = str(row["Severity"]).lower()
+        alert_rows += (
+            f"<tr><td>{row['Time']}</td><td>{row['Type']}</td><td>{row['Location']}</td>"
+            f"<td><span class='sev-chip {severity_css.get(sev, 'sev-moderate')}'>{row['Severity']}</span></td></tr>"
         )
-        st.line_chart(trend_src)
+    st.markdown(
+        f"""
+        <div class='dash-card'>
+            <div class='dash-card-head'><span>Recent Alert Log</span><span style='font-size:16px;color:#7A1E24;font-weight:700;'>View All</span></div>
+            <table class='dash-table'>
+                <thead><tr><th>Time</th><th>Type</th><th>Location</th><th>Severity</th></tr></thead>
+                <tbody>{alert_rows}</tbody>
+            </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        c1, c2, c3 = st.columns(3)
-        if len(trend_src) >= 8:
-            prev7 = float(trend_src.iloc[-8:-1].sum())
-            last7 = float(trend_src.iloc[-7:].sum())
-            growth = ((last7 - prev7) / prev7 * 100) if prev7 > 0 else 0.0
-        else:
-            growth = 0.0
-
-        focus_df = filtered_df[filtered_df["Primary_Type"] == focus["crime"]]
-        peak_hour = int(focus_df["Date"].dt.hour.mode().iloc[0]) if not focus_df.empty else 20
-
-        c1.metric("Growth Rate", f"{growth:+.1f}%")
-        c2.metric("Peak Hour", f"{peak_hour:02d}:00-{(peak_hour + 3) % 24:02d}:00")
-        c3.metric("Pattern", "Weekend clustering" if focus_df["Date"].dt.dayofweek.isin([5, 6]).mean() > 0.35 else "Weekday spread")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with right:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("### High-Risk Zones")
-        if risk_df.empty:
-            st.caption("No zone risks available.")
-        else:
-            for _, row in risk_df.head(5).iterrows():
-                sev = str(row["severity"]).lower()
-                st.markdown(
-                    f"""
-                    <div style='display:flex; justify-content:space-between; border:1px solid {THEME['line']}; border-radius:10px; padding:10px; margin-bottom:8px; background:white;'>
-                        <div>District {row['District']} — Risk: {row['risk_prob']:.2f}</div>
-                        <span class='pill pill-{sev}'>{row['severity']}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("<div class='footer'>PULS3 SYSTEM v2.4.1 | Internal Security Monitoring</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='dash-footer'><span>PULS3 SYSTEM V2.4.1</span><span>Internal Security Monitoring - Access restricted to authorized analysts only.</span><span>System Status &nbsp;&nbsp; API Docs &nbsp;&nbsp; Privacy Protocol</span></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
@@ -965,16 +1707,12 @@ def main() -> None:
 
     try:
         with st.spinner("Loading crime data and prediction model..."):
-            try:
-                df = load_crime_data()
-                st.session_state["data_source"] = "live"
-            except Exception:
-                df = generate_offline_crime_data()
-                st.session_state["data_source"] = "offline"
-            bundle = build_model(df)
+            df = load_little_rock_data()
+            bundle = load_model_bundle(df)
+            st.session_state["data_source"] = "little_rock"
     except Exception as exc:
         st.error(
-            "Could not load the crime dataset/model. Please ensure required packages are installed."
+            "Could not load Little Rock dataset/model. Add your exported Little Rock CSV under ./data and model artifact under ./models."
         )
         st.exception(exc)
         st.stop()
