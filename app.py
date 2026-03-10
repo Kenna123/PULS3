@@ -1224,7 +1224,10 @@ def build_pdf_report(
 
 
 def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
-    selected_crimes = ["Assault", "Robbery", "Theft"]
+    selected_crimes = [canonical_crime_name(c) for c in st.session_state.get("selected_crimes", [])]
+    selected_crimes = [c for c in selected_crimes if c in {"Assault", "Robbery", "Theft"}]
+    if not selected_crimes:
+        selected_crimes = ["Assault"]
     st.session_state.selected_crimes = selected_crimes
     selected_city = (st.session_state.location or "Little Rock").strip()
     if "LITTLE ROCK" not in selected_city.upper():
@@ -1277,6 +1280,8 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     selected_crime_df = location_df[location_df["Primary_Type"] == selected_crime].copy()
 
     alerts = fetch_recent_alerts(limit=5)
+    if not alerts.empty:
+        alerts = alerts[alerts["Type"].astype(str).isin(selected_crimes)].copy()
     if alerts.empty:
         alerts = get_alert_log(filtered_df, selected_crimes, selected_districts)
 
@@ -1691,10 +1696,8 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
 
     st.markdown("<div class='trend-wrap-title'>Crime Type Trends (Last 30 Days)</div>", unsafe_allow_html=True)
     st.caption("Compared to previous 30-day period.")
-    cols = st.columns(3)
+    cols = st.columns(max(len(trends), 1))
     for i, row in trends.iterrows():
-        if i > 2:
-            break
         with cols[i]:
             is_up = row["pct_change"] > 0
             change_color = "#8B1D2C" if is_up else "#1F9D66"
