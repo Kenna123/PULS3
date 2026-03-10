@@ -297,7 +297,8 @@ def init_state() -> None:
         "email": "",
         "location": "",
         "selected_crimes": ["Assault"],
-        "selected_crime": "Assault",
+        "selected_crime": "",
+        "selected_crime_user_selected": False,
         "active_crime": "Assault",
         "logged_in": False,
         "monitoring_started": False,
@@ -894,8 +895,9 @@ def render_setup(df: pd.DataFrame) -> None:
         st.session_state.location = "Little Rock"
         normalized_selection = [canonical_crime_name(c) for c in selected_now]
         st.session_state.selected_crimes = normalized_selection
+        st.session_state.selected_crime = ""
+        st.session_state.selected_crime_user_selected = False
         if normalized_selection:
-            st.session_state.selected_crime = normalized_selection[0]
             st.session_state.active_crime = normalized_selection[0]
         st.session_state["selected_districts"] = scoped_districts
 
@@ -1209,19 +1211,37 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     if filtered_df.empty:
         filtered_df = location_df.copy()
 
-    selected_crime = canonical_crime_name(st.session_state.get("selected_crime", "Assault"))
-    if selected_crime not in selected_crimes:
-        selected_crime = selected_crimes[0]
-    st.session_state.selected_crime = selected_crime
-    st.session_state.active_crime = selected_crime
-    selected_crime_df = location_df[location_df["Primary_Type"] == selected_crime].copy()
-
     risk_df = get_latest_zone_risk(bundle)
     if selected_districts:
         risk_df = risk_df[risk_df["District"].isin(selected_districts)]
     system_status = "NORMAL"
 
     trends = crime_type_trends(filtered_df, selected_crimes)
+    positive_trends = trends[trends["pct_change"] > 0].copy()
+    if not positive_trends.empty:
+        critical_row = positive_trends.sort_values("pct_change", ascending=False).iloc[0]
+    elif not trends.empty:
+        critical_row = trends.sort_values("pct_change", ascending=False).iloc[0]
+    else:
+        critical_row = pd.Series({"crime": "Assault", "pct_change": 0.0, "current": 0})
+    most_critical_crime = canonical_crime_name(critical_row.get("crime", "Assault"))
+    most_critical_spike = (
+        float(critical_row.get("pct_change", 0.0)) >= 10.0
+        and int(critical_row.get("current", 0)) >= 5
+    )
+
+    selected_crime_state = canonical_crime_name(st.session_state.get("selected_crime", ""))
+    user_selected = bool(st.session_state.get("selected_crime_user_selected", False))
+    if (not user_selected) and (selected_crime_state not in selected_crimes):
+        selected_crime_state = most_critical_crime
+        st.session_state.selected_crime = selected_crime_state
+    if selected_crime_state not in selected_crimes:
+        selected_crime_state = most_critical_crime if most_critical_crime in selected_crimes else selected_crimes[0]
+        st.session_state.selected_crime = selected_crime_state
+    selected_crime = selected_crime_state
+    st.session_state.active_crime = selected_crime
+    selected_crime_df = location_df[location_df["Primary_Type"] == selected_crime].copy()
+
     alerts = fetch_recent_alerts(limit=5)
     if alerts.empty:
         alerts = get_alert_log(filtered_df, selected_crimes, selected_districts)
@@ -1231,11 +1251,11 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         focus_row = pd.Series({"crime": selected_crime, "current": 0, "previous": 0, "pct_change": 0.0})
     else:
         focus_row = focus.iloc[0]
-    spike_detected = (
+    selected_spike_detected = (
         float(focus_row["pct_change"]) >= 10.0
         and int(focus_row["current"]) >= 5
     )
-    system_status = "ELEVATED" if spike_detected else "NORMAL"
+    system_status = "ELEVATED" if most_critical_spike else "NORMAL"
 
     history_daily, forecast_7 = arima_forecast_next_7(selected_crime_df, selected_crime)
     trend_src = history_daily.tail(14).rename("incidents")
@@ -1258,21 +1278,33 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         if not forecast_7.empty
         else "ARIMA forecasting unavailable due to insufficient data."
     )
+    logo_path = Path("assets/puls3-logo.png")
+    if logo_path.exists():
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+        topbar_logo = f"<img class='topbar-logo-img' src='data:image/png;base64,{logo_b64}' alt='PULS3 logo' />"
+    else:
+        topbar_logo = "<span class='topbar-logo-fallback'>PULS3</span>"
 
     st.markdown(
         """
         <style>
             .topbar {
                 display: flex; align-items: center; justify-content: space-between;
-                padding: 14px 28px; background: white; border-bottom: 1px solid #E5E7EB;
-                border-radius: 12px; margin-bottom: 18px;
+                padding: 14px 40px; background: white; border-bottom: 1px solid #E5E7EB;
+                border-radius: 0; margin: -1.2rem calc(50% - 50vw) 18px;
             }
-            .logo{ font-weight:800; color:#7A1E24; font-size:20px; }
-            .location {
-                background: #F3F4F6; padding: 8px 16px; border-radius: 10px;
-                font-weight: 500; color: #374151; min-width: 340px; text-align: center;
+            .topbar-logo-wrap{
+                display:flex; align-items:center;
             }
-            .user-icons { display: flex; gap: 16px; font-size: 18px; color: #374151; }
+            .topbar-logo-img{
+                height: 34px; width: auto; display: block;
+            }
+            .topbar-logo-fallback{
+                font-weight: 800; color: #7A1E24; font-size: 28px; letter-spacing: 0.01em;
+            }
+            .topbar-city{
+                color: #374151; font-size: 19px; font-weight: 600; letter-spacing: 0.01em;
+            }
             .status-banner{
                 background:#8B1D2C; color:white; padding:16px 22px; border-radius:12px; margin-top:18px; margin-bottom: 18px;
                 display:flex; justify-content:space-between; align-items:center; font-weight:600;
@@ -1464,13 +1496,12 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     st.markdown(
         f"""
         <div class="topbar">
-            <div class="logo">🛡 PULS3</div>
-            <div class="location">📍 {location or 'Little Rock, AR'}</div>
-            <div class="user-icons">🔔 👤</div>
+            <div class="topbar-logo-wrap">{topbar_logo}</div>
+            <div class="topbar-city">Little Rock</div>
         </div>
         <div class="status-banner">
             <div class="status-left">🛡 SYSTEM STATUS: {system_status}</div>
-            <div class="status-right">{'Early Warning: ' + selected_crime + ' - ' + location if spike_detected else 'No elevated warning - ' + location}</div>
+            <div class="status-right">{'Early Warning: ' + most_critical_crime + ' - ' + location if most_critical_spike else 'No elevated warning - ' + location}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1516,6 +1547,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
             st.markdown("<div class='trend-select'>", unsafe_allow_html=True)
             if st.button(f"Select {row['crime']}", key=f"select_crime_{row['crime']}", use_container_width=True):
                 st.session_state.selected_crime = row["crime"]
+                st.session_state.selected_crime_user_selected = True
                 st.session_state.active_crime = row["crime"]
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
@@ -1523,7 +1555,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     st.caption(f"Selected Crime: {selected_crime}")
 
     def render_spike_header() -> None:
-        if spike_detected:
+        if selected_spike_detected:
             title_txt = f"+{abs(focus_row['pct_change']):.0f}% Spike Detected - {selected_crime}"
             sub_txt = f"{selected_crime} incidents are increasing faster than expected"
         elif float(focus_row["pct_change"]) < 0:
@@ -1549,7 +1581,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                 "🛡 Alert Police Department",
                 key=f"alert_police_{selected_crime}",
                 use_container_width=True,
-                disabled=not spike_detected,
+                disabled=not selected_spike_detected,
             ):
                 insert_alert(selected_crime, str(top_zone), str(top_sev))
                 st.session_state["alert_message"] = "Police Department Alert Triggered"
@@ -1562,7 +1594,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                     percent_change=float(focus_row["pct_change"]),
                     current_count=int(focus_row["current"]),
                     previous_count=int(focus_row["previous"]),
-                    spike_detected=spike_detected,
+                    spike_detected=selected_spike_detected,
                     high_risk_zones=zone_counts,
                     peak_hours=peak_hours_txt,
                     pattern=pattern_txt,
