@@ -342,18 +342,40 @@ def init_state() -> None:
     # Restore auth/page on browser refresh within same URL session.
     qp_auth = str(st.query_params.get("auth", "")).strip()
     qp_page = str(st.query_params.get("page", "")).strip().lower()
+    qp_crimes = st.query_params.get("crimes", "")
+    if isinstance(qp_crimes, list):
+        qp_crimes = qp_crimes[0] if qp_crimes else ""
+    qp_crime = st.query_params.get("crime", "")
+    if isinstance(qp_crime, list):
+        qp_crime = qp_crime[0] if qp_crime else ""
     if (not st.session_state.logged_in) and qp_auth == "1":
         st.session_state.logged_in = True
         if qp_page in {"setup", "dashboard"}:
             st.session_state.page = qp_page
+    if str(qp_crimes).strip():
+        parsed = [canonical_crime_name(x.strip()) for x in str(qp_crimes).split(",") if x.strip()]
+        parsed = [x for x in parsed if x in {"Assault", "Robbery", "Theft"}]
+        if parsed:
+            st.session_state.selected_crimes = parsed
+    qp_crime = canonical_crime_name(str(qp_crime).strip())
+    if qp_crime in {"Assault", "Robbery", "Theft"}:
+        st.session_state.selected_crime = qp_crime
 
 
-def set_auth_query_params(logged_in: bool, page: str) -> None:
+def set_auth_query_params(logged_in: bool, page: str, selected_crimes: Optional[List[str]] = None, selected_crime: str = "") -> None:
     if logged_in:
         st.query_params["auth"] = "1"
         st.query_params["page"] = page
+        if selected_crimes:
+            clean = [canonical_crime_name(c) for c in selected_crimes if canonical_crime_name(c) in {"Assault", "Robbery", "Theft"}]
+            if clean:
+                st.query_params["crimes"] = ",".join(clean)
+        if selected_crime:
+            clean_crime = canonical_crime_name(selected_crime)
+            if clean_crime in {"Assault", "Robbery", "Theft"}:
+                st.query_params["crime"] = clean_crime
     else:
-        for key in ["auth", "page", "crime"]:
+        for key in ["auth", "page", "crime", "crimes"]:
             if key in st.query_params:
                 del st.query_params[key]
 
@@ -686,7 +708,7 @@ def render_login() -> None:
             st.session_state.email = email.strip()
             st.session_state.logged_in = True
             st.session_state.page = "setup"
-            set_auth_query_params(True, "setup")
+            set_auth_query_params(True, "setup", st.session_state.selected_crimes, st.session_state.selected_crime)
             st.rerun()
         else:
             st.warning("Please provide email and password.")
@@ -957,7 +979,12 @@ def render_setup(df: pd.DataFrame) -> None:
         else:
             st.session_state.monitoring_started = True
             st.session_state.page = "dashboard"
-            set_auth_query_params(True, "dashboard")
+            set_auth_query_params(
+                True,
+                "dashboard",
+                normalized_selection,
+                normalized_selection[0] if normalized_selection else "Assault",
+            )
             st.rerun()
 
     st.markdown(
@@ -1297,6 +1324,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         st.session_state.selected_crime = selected_crime_state
     selected_crime = selected_crime_state
     st.session_state.active_crime = selected_crime
+    set_auth_query_params(True, "dashboard", selected_crimes, selected_crime)
     selected_crime_df = location_df[location_df["Primary_Type"] == selected_crime].copy()
 
     alerts = fetch_recent_alerts(limit=5)
@@ -1761,6 +1789,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                 st.session_state.selected_crime = row["crime"]
                 st.session_state.selected_crime_user_selected = True
                 st.session_state.active_crime = row["crime"]
+                set_auth_query_params(True, "dashboard", selected_crimes, row["crime"])
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
