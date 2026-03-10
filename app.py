@@ -1316,7 +1316,8 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
 
     selected_crime_state = canonical_crime_name(st.session_state.get("selected_crime", ""))
     user_selected = bool(st.session_state.get("selected_crime_user_selected", False))
-    if (not user_selected) and (selected_crime_state not in selected_crimes):
+    # Default selection should track the most critical crime unless user explicitly chose a card.
+    if not user_selected:
         selected_crime_state = most_critical_crime
         st.session_state.selected_crime = selected_crime_state
     if selected_crime_state not in selected_crimes:
@@ -1330,6 +1331,9 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     alerts = fetch_recent_alerts(limit=5)
     if not alerts.empty:
         alerts = alerts[alerts["Type"].astype(str).isin(selected_crimes)].copy()
+        # Drop legacy alert rows that stored district-only placeholders.
+        bad_loc = alerts["Location"].astype(str).str.match(r"(?i)^district\\s+\\d+(?:\\.0+)?$")
+        alerts = alerts[~bad_loc].copy()
     if alerts.empty:
         alerts = get_alert_log(filtered_df, selected_crimes, selected_districts)
 
