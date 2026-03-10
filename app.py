@@ -1822,29 +1822,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                 unsafe_allow_html=True,
             )
             smooth_src = trend_src.rolling(3, min_periods=1).mean()
-            if HAS_MATPLOTLIB and not smooth_src.empty:
-                fig, ax = plt.subplots(figsize=(8.4, 3.1), facecolor="#FCFBFC")
-                ax.set_facecolor("#FCFBFC")
-                x = np.arange(len(smooth_src))
-                y = smooth_src.values.astype(float)
-                ax.plot(
-                    x,
-                    y,
-                    color="#8B1D2C",
-                    linewidth=5,
-                    solid_capstyle="round",
-                    solid_joinstyle="round",
-                )
-                ax.scatter([x[-1]], [y[-1]], s=130, color="#8B1D2C", zorder=5)
-                ax.set_xlim(x.min(), x.max())
-                for spine in ["top", "right", "left", "bottom"]:
-                    ax.spines[spine].set_visible(False)
-                ax.grid(False)
-                ax.tick_params(axis="both", which="both", length=0, labelbottom=False, labelleft=False)
-                fig.tight_layout(pad=0.4)
-                st.pyplot(fig, use_container_width=True, clear_figure=True)
-            else:
-                st.line_chart(smooth_src, color="#8B1D2C")
+            st.line_chart(smooth_src, color="#8B1D2C")
             if not forecast_7.empty:
                 st.caption(
                     f"Expected incidents next week: {forecast_7.sum():.1f}"
