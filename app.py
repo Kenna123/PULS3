@@ -2,6 +2,7 @@ import datetime as dt
 import base64
 import sqlite3
 import tempfile
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -173,13 +174,38 @@ def _normalize_lr_columns(df: pd.DataFrame) -> pd.DataFrame:
 def load_little_rock_data() -> pd.DataFrame:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     candidates = list(DATA_DIR.glob("*.csv"))
-    if not candidates:
-        raise FileNotFoundError(
-            "No Little Rock dataset found. Place your exported CSV in ./data/ (e.g., data/little_rock_crime.csv)."
-        )
-    latest = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
-    df = pd.read_csv(latest)
-    return _normalize_lr_columns(df)
+    if candidates:
+        latest = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+        df = pd.read_csv(latest)
+        return _normalize_lr_columns(df)
+
+    # Cloud fallback: allow dataset URL via Streamlit secrets or env var.
+    dataset_urls: List[str] = []
+    try:
+        if "LRPD_DATASET_URL" in st.secrets:
+            dataset_urls.append(str(st.secrets["LRPD_DATASET_URL"]))
+        data_block = st.secrets.get("data", {})
+        if isinstance(data_block, dict) and data_block.get("dataset_url"):
+            dataset_urls.append(str(data_block.get("dataset_url")))
+    except Exception:
+        pass
+
+    env_url = os.getenv("LRPD_DATASET_URL", "").strip()
+    if env_url:
+        dataset_urls.append(env_url)
+
+    for url in dataset_urls:
+        if not url:
+            continue
+        try:
+            remote_df = pd.read_csv(url)
+            return _normalize_lr_columns(remote_df)
+        except Exception:
+            continue
+
+    raise FileNotFoundError(
+        "No Little Rock dataset found. Add CSV under ./data/ OR set LRPD_DATASET_URL in Streamlit secrets/environment."
+    )
 
 
 @st.cache_resource(show_spinner=False)
