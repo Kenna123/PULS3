@@ -1946,9 +1946,8 @@ def main() -> None:
     inject_css()
 
     try:
-        with st.spinner("Loading crime data and prediction model..."):
+        with st.spinner("Loading crime data..."):
             df = load_little_rock_data()
-            bundle = load_model_bundle(df)
             st.session_state["data_source"] = "little_rock"
     except Exception as exc:
         st.error(
@@ -1963,6 +1962,15 @@ def main() -> None:
     elif page == "setup":
         render_setup(df)
     else:
+        try:
+            with st.spinner("Loading prediction model..."):
+                bundle = load_model_bundle(df)
+        except Exception as exc:
+            st.error(
+                "Could not load/train the prediction model in this environment."
+            )
+            st.exception(exc)
+            st.stop()
         render_dashboard(df, bundle)
 
 
