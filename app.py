@@ -164,6 +164,8 @@ def _normalize_lr_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     df["Primary_Type"] = df["Primary_Type"].apply(_map_primary_type)
     df["District"] = df["District"].astype(str)
+    # Normalize district display (e.g., "83.0" -> "83")
+    df["District"] = df["District"].str.replace(r"\.0+$", "", regex=True)
     df["Neighborhood"] = df["Neighborhood"].astype(str)
     df["City"] = df["City"].astype(str)
     df["Zipcode"] = df["Zipcode"].astype(str)
@@ -177,7 +179,9 @@ def load_little_rock_data() -> pd.DataFrame:
     if candidates:
         latest = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
         df = pd.read_csv(latest)
-        return _normalize_lr_columns(df)
+        out = _normalize_lr_columns(df)
+        lr_only = out[out["City"].astype(str).str.contains("LITTLE ROCK", case=False, na=False)].copy()
+        return lr_only if not lr_only.empty else out
 
     # Cloud fallback: allow dataset URL via Streamlit secrets or env var.
     dataset_urls: List[str] = []
@@ -199,7 +203,9 @@ def load_little_rock_data() -> pd.DataFrame:
             continue
         try:
             remote_df = pd.read_csv(url)
-            return _normalize_lr_columns(remote_df)
+            out = _normalize_lr_columns(remote_df)
+            lr_only = out[out["City"].astype(str).str.contains("LITTLE ROCK", case=False, na=False)].copy()
+            return lr_only if not lr_only.empty else out
         except Exception:
             continue
 
@@ -988,7 +994,9 @@ def get_alert_log(df: pd.DataFrame, selected_crimes: List[str], districts: List[
     rec = filtered.sort_values("Date", ascending=False).head(5).copy()
     rec["Time"] = rec["Date"].dt.strftime("%I:%M %p")
     rec["Type"] = rec["Primary_Type"]
-    rec["Location"] = "District " + rec["District"].astype(str)
+    rec["Location"] = rec.get("Neighborhood", pd.Series([""] * len(rec), index=rec.index)).astype(str).str.strip()
+    empty_loc = rec["Location"].eq("") | rec["Location"].str.lower().eq("nan")
+    rec.loc[empty_loc, "Location"] = "District " + rec.loc[empty_loc, "District"].astype(str)
 
     severity_map = {
         "Assault": "Critical",
