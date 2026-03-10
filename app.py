@@ -1039,7 +1039,7 @@ def get_alert_log(df: pd.DataFrame, selected_crimes: List[str], districts: List[
         filtered = filtered[filtered["District"].isin(districts)]
 
     rec = filtered.sort_values("Date", ascending=False).head(5).copy()
-    rec["Time"] = rec["Date"].dt.strftime("%I:%M %p")
+    rec["Time"] = rec["Date"].dt.strftime("%m-%d-%Y")
     rec["Type"] = rec["Primary_Type"]
     rec["Location"] = rec.get("Neighborhood", pd.Series([""] * len(rec), index=rec.index)).astype(str).str.strip()
     empty_loc = rec["Location"].eq("") | rec["Location"].str.lower().eq("nan")
@@ -1186,7 +1186,7 @@ def fetch_recent_alerts(limit: int = 12) -> pd.DataFrame:
     dt_col = pd.to_datetime(df["created_at"], errors="coerce")
     out = pd.DataFrame(
         {
-            "Time": dt_col.dt.strftime("%I:%M %p").fillna(""),
+            "Time": dt_col.dt.strftime("%m-%d-%Y").fillna(""),
             "Type": df["crime_type"].astype(str),
             "Location": df["location"].astype(str),
             "Severity": df["severity"].astype(str),
@@ -1301,6 +1301,16 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
     system_status = "NORMAL"
 
     trends = crime_type_trends(filtered_df, selected_crimes)
+    window_end = filtered_df["Date"].max() if (not filtered_df.empty and "Date" in filtered_df.columns) else dt.datetime.now()
+    if pd.isna(window_end):
+        window_end = dt.datetime.now()
+    current_30_start = window_end - pd.Timedelta(days=30)
+    previous_30_start = window_end - pd.Timedelta(days=60)
+    previous_30_end = current_30_start - pd.Timedelta(days=1)
+    trends_title = f"Crime Type Trends ({current_30_start:%m-%d-%Y} to {window_end:%m-%d-%Y})"
+    trends_caption = (
+        f"Compared to {previous_30_start:%m-%d-%Y} to {previous_30_end:%m-%d-%Y}."
+    )
     positive_trends = trends[trends["pct_change"] > 0].copy()
     if not positive_trends.empty:
         critical_row = positive_trends.sort_values("pct_change", ascending=False).iloc[0]
@@ -1354,11 +1364,15 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         trend_src = pd.Series([0, 1, 0, 2, 3, 2, 4], index=pd.date_range(dt.datetime.now(), periods=7, freq="D"), name="incidents")
 
     if len(history_daily) >= 14:
-        prev7 = float(history_daily.iloc[-14:-7].sum())
-        last7 = float(history_daily.iloc[-7:].sum())
+        prev7_series = history_daily.iloc[-14:-7]
+        last7_series = history_daily.iloc[-7:]
+        prev7 = float(prev7_series.sum())
+        last7 = float(last7_series.sum())
         growth = ((last7 - prev7) / max(prev7, 1.0)) * 100
+        growth_range_text = f"{last7_series.index.min():%m-%d-%Y} to {last7_series.index.max():%m-%d-%Y}"
     else:
         growth = 0.0
+        growth_range_text = "Insufficient range"
 
     peak_hours_txt, pattern_txt = get_peak_hours_and_pattern(selected_crime_df, selected_crime)
     zone_counts = get_zone_counts(selected_crime_df, selected_crime, days=14)
@@ -1756,8 +1770,8 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         st.success(st.session_state["alert_message"])
         st.session_state["alert_message"] = ""
 
-    st.markdown("<div class='trend-wrap-title'>Crime Type Trends (Last 30 Days)</div>", unsafe_allow_html=True)
-    st.caption("Compared to previous 30-day period.")
+    st.markdown(f"<div class='trend-wrap-title'>{trends_title}</div>", unsafe_allow_html=True)
+    st.caption(trends_caption)
     cols = st.columns(max(len(trends), 1))
     for i, row in trends.iterrows():
         with cols[i]:
@@ -1880,7 +1894,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
             st.markdown(
                 """
                 <div class="trend-box">
-                <div class="trend-label">PAST 14 DAYS TREND</div>
+                <div class="trend-label">TREND ({trend_src.index.min():%m-%d-%Y} to {trend_src.index.max():%m-%d-%Y})</div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -1923,7 +1937,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                     <div class="insight-icon">↗</div>
                     <div class="insight-copy">
                         <div class="insight-title">GROWTH RATE</div>
-                        <div class="insight-value">{growth:+.1f}% last 7 days</div>
+                        <div class="insight-value">{growth:+.1f}% ({growth_range_text})</div>
                     </div>
                 </div>
                 """,
@@ -1979,7 +1993,7 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         <div class='dash-card'>
             <div class='dash-card-head'><span>Recent Alert Log</span><span style='font-size:16px;color:#7A1E24;font-weight:700;'>View All</span></div>
             <table class='dash-table'>
-                <thead><tr><th>Time</th><th>Type</th><th>Location</th><th>Severity</th></tr></thead>
+                <thead><tr><th>Date</th><th>Type</th><th>Location</th><th>Severity</th></tr></thead>
                 <tbody>{alert_rows}</tbody>
             </table>
         </div>
