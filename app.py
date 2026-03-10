@@ -1373,120 +1373,265 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                 margin-top: 22px; color: #7a6b70; font-size: 17px; display: flex; justify-content: space-between;
                 border-top: 1px solid #e5e1e3; padding-top: 14px;
             }
-            .spike-card{
-                background:white;
-                border-radius:18px;
-                border:1px solid #E5E7EB;
-                padding:30px;
-                margin-top:20px;
+            div[data-testid="stVerticalBlockBorderWrapper"]{
+                background: #FFFFFF;
+                border-radius: 20px;
+                border: 1px solid #EEE7EA !important;
+                box-shadow: 0 8px 24px rgba(25, 18, 24, 0.05);
+                padding: 20px 18px 20px 18px;
+                margin-top: 20px;
             }
             .spike-header{
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                margin-bottom:20px;
-                gap: 18px;
+                margin-bottom: 18px;
             }
             .spike-header h2{
-                margin:0;
-                color:#1f2937;
-                font-size:46px;
-                font-weight:800;
+                margin: 0;
+                color: #1F2937;
+                font-size: 24px;
+                line-height: 1.2;
+                font-weight: 800;
             }
             .spike-sub{
-                color:#6B7280;
-                margin-top:4px;
-                font-size:27px;
+                color: #6B7280;
+                margin-top: 6px;
+                font-size: 15px;
             }
-            .spike-actions{
-                display:flex;
-                align-items:center;
+            .spike-actions-row{
+                display: flex;
+                justify-content: flex-end;
+                gap: 12px;
+                align-items: center;
             }
-            .alert-btn{
-                background:#8B1D2C;
-                color:white;
-                border:none;
-                padding:10px 16px;
-                border-radius:8px;
-                font-weight:600;
-                margin-right:10px;
+            .download-link{
+                width: 100%;
+                min-height: 52px;
+                border-radius: 12px;
+                border: 1px solid #DDD6DA;
+                background: #FFFFFF;
+                color: #1F2937;
+                font-size: 18px;
+                font-weight: 700;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                box-sizing: border-box;
             }
-            .download-btn{
-                background:white;
-                border:1px solid #E5E7EB;
-                padding:10px 16px;
-                border-radius:8px;
+            .download-link:hover,
+            .download-link:focus,
+            .download-link:active{
+                background: #FFFFFF;
+                color: #1F2937;
+                text-decoration: none;
+                border: 1px solid #DDD6DA;
+            }
+            .download-link.disabled{
+                background: #F8FAFC;
+                color: #7D8590;
+                border: 1px solid #D6DCE3;
+                cursor: not-allowed;
+                pointer-events: none;
             }
             .trend-box{
-                border:1px dashed #E5E7EB;
-                border-radius:14px;
-                padding:18px;
+                background: #FCFBFC;
+                border: 1px dashed #E8E1E5;
+                border-radius: 14px;
+                padding: 16px 16px 8px 16px;
+            }
+            .trend-svg-wrap{
+                width: 100%;
+                height: 320px;
+                border-radius: 10px;
+                overflow: hidden;
+                background: #FCFBFC;
+            }
+            .trend-svg-wrap svg{
+                width: 100%;
+                height: 100%;
+                display: block;
             }
             .trend-label{
-                font-size:12px;
-                letter-spacing:.08em;
-                color:#6B7280;
-                margin-bottom:10px;
+                font-size: 12px;
+                letter-spacing: .08em;
+                color: #6B7280;
+                margin-bottom: 10px;
                 text-transform: uppercase;
                 font-weight: 700;
             }
             .risk-title{
-                font-size:12px;
-                letter-spacing:.08em;
-                color:#6B7280;
-                margin-bottom:12px;
+                font-size: 12px;
+                letter-spacing: .08em;
+                color: #6B7280;
+                margin-bottom: 14px;
                 text-transform: uppercase;
                 font-weight: 700;
             }
             .risk-item{
-                display:flex;
-                justify-content:space-between;
-                padding:14px 16px;
-                border-radius:10px;
-                margin-bottom:12px;
-                font-weight:600;
+                display: flex;
+                justify-content: space-between;
+                padding: 12px 14px;
+                border-radius: 10px;
+                margin-bottom: 14px;
+                font-weight: 600;
+                border: 1px solid transparent;
             }
             .risk-critical{
-                background:#FDECEC;
-                color:#991B1B;
-                border-left:6px solid #991B1B;
+                background: #FDECEC;
+                color: #991B1B;
+                border-left: 5px solid #991B1B;
             }
             .risk-elevated{
-                background:#FFF3E8;
-                color:#C2410C;
-                border-left:6px solid #F97316;
+                background: #FFF3E8;
+                color: #C2410C;
+                border-left: 5px solid #F97316;
             }
             .risk-moderate{
-                background:#FFF8E1;
-                color:#B45309;
-                border-left:6px solid #F59E0B;
+                background: #FFF8E1;
+                color: #B45309;
+                border-left: 5px solid #F59E0B;
             }
             .risk-low{
-                background:#ECFDF5;
-                color:#047857;
-                border-left:6px solid #10B981;
+                background: #ECFDF5;
+                color: #047857;
+                border-left: 5px solid #10B981;
             }
             .risk-badge{
-                font-weight:700;
+                font-weight: 800;
+                letter-spacing: .02em;
             }
             .insight-card{
-                background:#F9FAFB;
-                border-radius:12px;
-                padding:18px;
-                border:1px solid #E5E7EB;
+                background: #FFFFFF;
+                border-radius: 12px;
+                padding: 14px 14px;
+                border: 1px solid #E5E7EB;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-height: 78px;
+            }
+            .insight-icon{
+                width: 34px;
+                height: 34px;
+                border-radius: 999px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: #F7ECEF;
+                color: #8B1D2C;
+                font-size: 16px;
+                font-weight: 700;
+                flex: 0 0 34px;
+            }
+            .insight-copy{
+                display: flex;
+                flex-direction: column;
             }
             .insight-title{
-                font-size:12px;
-                color:#6B7280;
-                letter-spacing:.08em;
+                font-size: 11px;
+                color: #6B7280;
+                letter-spacing: .08em;
                 text-transform: uppercase;
                 font-weight: 700;
             }
             .insight-value{
-                font-size:20px;
-                font-weight:700;
-                margin-top:6px;
-                color:#1f2937;
+                font-size: 22px;
+                font-weight: 700;
+                margin-top: 3px;
+                color: #1f2937;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stButton"] > button{
+                border-radius: 12px !important;
+                min-height: 52px !important;
+                font-size: 18px !important;
+                font-weight: 700 !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stDownloadButton"] > button,
+            div[data-testid="stVerticalBlockBorderWrapper"] .stDownloadButton > button{
+                border-radius: 12px !important;
+                min-height: 52px !important;
+                font-size: 18px !important;
+                font-weight: 700 !important;
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+                box-shadow: none !important;
+                opacity: 1 !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]{
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+                box-shadow: none !important;
+            }
+            .spike-actions-row div[data-testid="stDownloadButton"] > button{
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+            }
+            .spike-actions-row .stDownloadButton button,
+            .spike-actions-row div[data-testid="stDownloadButton"] button{
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+                box-shadow: none !important;
+                -webkit-text-fill-color: #1F2937 !important;
+                opacity: 1 !important;
+            }
+            .spike-actions-row button[kind="secondary"],
+            .spike-actions-row button[data-testid="baseButton-secondary"]{
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+                box-shadow: none !important;
+                -webkit-text-fill-color: #1F2937 !important;
+                opacity: 1 !important;
+            }
+            .spike-actions-row .stDownloadButton button *,
+            .spike-actions-row div[data-testid="stDownloadButton"] button *{
+                color: inherit !important;
+                -webkit-text-fill-color: currentColor !important;
+            }
+            .spike-actions-row div[data-testid="stDownloadButton"] > button:hover,
+            .spike-actions-row div[data-testid="stDownloadButton"] > button:focus,
+            .spike-actions-row div[data-testid="stDownloadButton"] > button:active{
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+                box-shadow: none !important;
+            }
+            .spike-actions-row button[kind="secondary"]:hover,
+            .spike-actions-row button[kind="secondary"]:focus,
+            .spike-actions-row button[kind="secondary"]:active{
+                background: #FFFFFF !important;
+                color: #1F2937 !important;
+                border: 1px solid #DDD6DA !important;
+                box-shadow: none !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stButton"] > button:disabled,
+            div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stDownloadButton"] > button:disabled{
+                opacity: 1 !important;
+                cursor: not-allowed !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stDownloadButton"] > button:disabled{
+                background: #FFFFFF !important;
+                color: #9CA3AF !important;
+                border: 1px solid #E5E7EB !important;
+                -webkit-text-fill-color: #9CA3AF !important;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:disabled{
+                background: #F8FAFC !important;
+                color: #7D8590 !important;
+                border: 1px solid #D6DCE3 !important;
+                opacity: 1 !important;
+                -webkit-text-fill-color: #7D8590 !important;
+            }
+            .spike-actions-row .stDownloadButton button:disabled,
+            .spike-actions-row button[kind="secondary"]:disabled{
+                background: #F8FAFC !important;
+                color: #7D8590 !important;
+                border: 1px solid #D6DCE3 !important;
+                opacity: 1 !important;
+                -webkit-text-fill-color: #7D8590 !important;
             }
         </style>
         """,
@@ -1564,62 +1709,69 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
         else:
             title_txt = f"No Significant Spike - {selected_crime}"
             sub_txt = f"{selected_crime} incident activity is currently within expected range."
-        st.markdown(
-            f"""
-            <div class="spike-header">
-                <div>
+        h1, h2 = st.columns([1.9, 1.45])
+        with h1:
+            st.markdown(
+                f"""
+                <div class="spike-header">
                     <h2>{title_txt}</h2>
                     <p class="spike-sub">{sub_txt}</p>
                 </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        a1, a2 = st.columns([1, 1])
-        with a1:
-            if st.button(
-                "🛡 Alert Police Department",
-                key=f"alert_police_{selected_crime}",
-                use_container_width=True,
-                disabled=not selected_spike_detected,
-            ):
-                insert_alert(selected_crime, str(top_zone), str(top_sev))
-                st.session_state["alert_message"] = "Police Department Alert Triggered"
-                st.rerun()
-        with a2:
-            if HAS_FPDF:
-                report_bytes = build_pdf_report(
-                    location=location or "Little Rock",
-                    selected_crime=selected_crime,
-                    percent_change=float(focus_row["pct_change"]),
-                    current_count=int(focus_row["current"]),
-                    previous_count=int(focus_row["previous"]),
-                    spike_detected=selected_spike_detected,
-                    high_risk_zones=zone_counts,
-                    peak_hours=peak_hours_txt,
-                    pattern=pattern_txt,
-                    forecast_summary=forecast_summary,
-                    trend_series=trend_src,
-                )
-                st.download_button(
-                    "⬇ Download Report",
-                    data=report_bytes,
-                    file_name="puls3_crime_report.pdf",
-                    mime="application/pdf",
+                """,
+                unsafe_allow_html=True,
+            )
+        with h2:
+            st.markdown("<div class='spike-actions-row'>", unsafe_allow_html=True)
+            a1, a2 = st.columns(2)
+            with a1:
+                if st.button(
+                    "🛡 Alert Police Department",
+                    key=f"alert_police_{selected_crime}",
                     use_container_width=True,
-                    disabled=False,
-                    key=f"download_report_{selected_crime}",
-                )
-            else:
-                st.download_button(
-                    "⬇ Download Report",
-                    data=b"",
-                    file_name="puls3_crime_report.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    disabled=True,
-                    key=f"download_report_{selected_crime}_disabled",
-                )
+                    disabled=not selected_spike_detected,
+                ):
+                    insert_alert(selected_crime, str(top_zone), str(top_sev))
+                    st.session_state["alert_message"] = "Police Department Alert Triggered"
+                    st.rerun()
+            with a2:
+                if HAS_FPDF:
+                    report_bytes = build_pdf_report(
+                        location=location or "Little Rock",
+                        selected_crime=selected_crime,
+                        percent_change=float(focus_row["pct_change"]),
+                        current_count=int(focus_row["current"]),
+                        previous_count=int(focus_row["previous"]),
+                        spike_detected=selected_spike_detected,
+                        high_risk_zones=zone_counts,
+                        peak_hours=peak_hours_txt,
+                        pattern=pattern_txt,
+                        forecast_summary=forecast_summary,
+                        trend_series=trend_src,
+                    )
+                    report_b64 = base64.b64encode(report_bytes).decode("ascii")
+                    st.markdown(
+                        f"""
+                        <a class="download-link"
+                           style="width:100%;min-height:52px;border-radius:12px;border:1px solid #DDD6DA;background:#FFFFFF;color:#1F2937;font-size:18px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;"
+                           download="puls3_crime_report.pdf"
+                           href="data:application/pdf;base64,{report_b64}">
+                           ↓ Download Report
+                        </a>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        """
+                        <span class="download-link disabled"
+                              style="width:100%;min-height:52px;border-radius:12px;border:1px solid #D6DCE3;background:#F8FAFC;color:#7D8590;font-size:18px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;">
+                              ↓ Download Report
+                        </span>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            st.markdown("</div>", unsafe_allow_html=True)
+            if not HAS_FPDF:
                 st.caption("Install `fpdf2` to enable PDF report downloads.")
 
     def render_spike_body() -> None:
@@ -1633,7 +1785,29 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
                 unsafe_allow_html=True,
             )
             smooth_src = trend_src.rolling(3, min_periods=1).mean()
-            st.line_chart(smooth_src, color="#8B1D2C")
+            if HAS_MATPLOTLIB and not smooth_src.empty:
+                fig, ax = plt.subplots(figsize=(8.4, 3.1), facecolor="#FCFBFC")
+                ax.set_facecolor("#FCFBFC")
+                x = np.arange(len(smooth_src))
+                y = smooth_src.values.astype(float)
+                ax.plot(
+                    x,
+                    y,
+                    color="#8B1D2C",
+                    linewidth=5,
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
+                )
+                ax.scatter([x[-1]], [y[-1]], s=130, color="#8B1D2C", zorder=5)
+                ax.set_xlim(x.min(), x.max())
+                for spine in ["top", "right", "left", "bottom"]:
+                    ax.spines[spine].set_visible(False)
+                ax.grid(False)
+                ax.tick_params(axis="both", which="both", length=0, labelbottom=False, labelleft=False)
+                fig.tight_layout(pad=0.4)
+                st.pyplot(fig, use_container_width=True, clear_figure=True)
+            else:
+                st.line_chart(smooth_src, color="#8B1D2C")
             if not forecast_7.empty:
                 st.caption(
                     f"Expected incidents next week: {forecast_7.sum():.1f}"
@@ -1668,8 +1842,11 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
             st.markdown(
                 f"""
                 <div class="insight-card">
-                    <div class="insight-title">GROWTH RATE</div>
-                    <div class="insight-value">{growth:+.1f}% last 7 days</div>
+                    <div class="insight-icon">↗</div>
+                    <div class="insight-copy">
+                        <div class="insight-title">GROWTH RATE</div>
+                        <div class="insight-value">{growth:+.1f}% last 7 days</div>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1678,8 +1855,11 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
             st.markdown(
                 f"""
                 <div class="insight-card">
-                    <div class="insight-title">PEAK HOURS</div>
-                    <div class="insight-value">{peak_hours_txt}</div>
+                    <div class="insight-icon">◷</div>
+                    <div class="insight-copy">
+                        <div class="insight-title">PEAK HOURS</div>
+                        <div class="insight-value">{peak_hours_txt}</div>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1688,18 +1868,20 @@ def render_dashboard(df: pd.DataFrame, bundle: ModelBundle) -> None:
             st.markdown(
                 f"""
                 <div class="insight-card">
-                    <div class="insight-title">PATTERN</div>
-                    <div class="insight-value">{pattern_txt}</div>
+                    <div class="insight-icon">▣</div>
+                    <div class="insight-copy">
+                        <div class="insight-title">PATTERN</div>
+                        <div class="insight-value">{pattern_txt}</div>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-    st.markdown('<div class="spike-card">', unsafe_allow_html=True)
-    render_spike_header()
-    render_spike_body()
-    render_spike_insights()
-    st.markdown("</div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        render_spike_header()
+        render_spike_body()
+        render_spike_insights()
 
     severity_css = {
         "critical": "sev-critical",
